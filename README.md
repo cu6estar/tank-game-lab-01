@@ -1,5 +1,5 @@
 # Tank Arena — Lab 01
-
+окакккккк
 Лабораторна робота 01 з JavaScript: Event Loop та Game Loop.
 
 ## Тема
