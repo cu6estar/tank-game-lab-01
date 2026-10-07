@@ -10,12 +10,17 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "exp:this": "node experiments/this-bug.js",
-    "exp:proto": "node experiments/prototype-chain.js"
+    "exp:proto": "node experiments/prototype-chain.js",
+    "test": "node --test",
+    "exp:timing": "node experiments/sequential-vs-concurrent.js",
+    "exp:puzzles": "node experiments/puzzles.js",
+    "exp:failures": "node experiments/failure-gallery.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.1.0",
+    "globals": "^17.13.0",
     "prettier": "^3.0.0",
     "vite": "^7.0.0"
   }

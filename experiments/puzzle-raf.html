@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Головоломка 5: requestAnimationFrame і мікрозадачі</title>
+<pre id="out"></pre>
+<script>
+  // Очікуваний вивід:
+  //   sync → micro (sync) → raf 1 → micro (з raf 1) → raf 2
+  // Мікрозадачі виконуються після КОЖНОГО колбека, тож між raf 1 і raf 2
+  // встигає micro, поставлений із raf 1. rAF — не мікрозадача й не звичайна
+  // задача, а крок рендеру: обидва колбеки йдуть в одному кадрі.
+  const lines = [];
+  const log = (text) => lines.push(text);
+
+  requestAnimationFrame(() => {
+    log('raf 1');
+    Promise.resolve().then(() => log('micro (з raf 1)'));
+  });
+  requestAnimationFrame(() => {
+    log('raf 2');
+    document.getElementById('out').textContent = lines.join(' → ');
+    document.title = 'done: ' + lines.join(' → ');
+  });
+  Promise.resolve().then(() => log('micro (sync)'));
+  log('sync');
+</script>

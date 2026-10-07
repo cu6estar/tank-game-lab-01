@@ -69,3 +69,186 @@ body {
   border-radius: 8px;
   line-height: 1.5;
 }
+
+[hidden] {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  color: #e9f5e5;
+  background: #2d5a2a;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #3a7336;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #ffe56a;
+  outline-offset: 2px;
+}
+
+/* кнопки екрана завантаження: під прогрес-баром, який малюється на канвасі */
+#loading-actions {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 150px);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  color: #e9f5e5;
+  background: rgba(10, 16, 10, 0.78);
+  overflow-y: auto;
+}
+
+.overlay h1 {
+  margin: 0;
+  font:
+    bold 44px Consolas,
+    monospace;
+  letter-spacing: 2px;
+}
+
+.overlay .subtitle {
+  margin: 4px 0 20px;
+  color: rgba(233, 245, 229, 0.6);
+  font-family: Consolas, monospace;
+}
+
+#lobby-form {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+}
+
+#lobby-form fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+#lobby-form legend,
+.field span {
+  display: block;
+  margin-bottom: 6px;
+  color: rgba(233, 245, 229, 0.7);
+  font-size: 14px;
+}
+
+.field input {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  color: #e9f5e5;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.room-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-list .empty {
+  padding: 12px;
+  color: rgba(233, 245, 229, 0.55);
+}
+
+.room {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.room:has(input:checked) {
+  background: rgba(111, 211, 106, 0.18);
+  border-color: #6fd36a;
+}
+
+.room:has(input:focus-visible) {
+  outline: 2px solid #ffe56a;
+}
+
+.room.full {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.room input {
+  grid-row: span 2;
+  align-self: center;
+}
+
+.room-name {
+  font-weight: bold;
+}
+
+.room-meta {
+  grid-column: 2;
+  font-size: 13px;
+  color: rgba(233, 245, 229, 0.65);
+}
+
+.lobby-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  min-height: 24px;
+  font-size: 13px;
+  color: rgba(233, 245, 229, 0.65);
+}
+
+.lobby-status .error {
+  color: #ff8a7a;
+}
+
+#join {
+  align-self: flex-end;
+  min-width: 120px;
+  font-weight: bold;
+}
+
+/* игрові панелі видно лише під час гри, не на екрані завантаження та в лобі */
+body:not([data-phase='game']) #hud,
+body:not([data-phase='game']) #scoreboard,
+body:not([data-phase='game']) #help {
+  display: none;
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "assets": [
+    { "key": "atlas", "type": "json", "url": "/assets/sprites.json" },
+    { "key": "sprites", "type": "image", "url": "/assets/sprites.png" },
+    { "key": "shoot", "type": "audio", "url": "/assets/shoot.wav", "optional": true },
+    { "key": "hit", "type": "audio", "url": "/assets/hit.wav", "optional": true },
+    { "key": "explosion", "type": "audio", "url": "/assets/explosion.wav", "optional": true }
+  ]
+}

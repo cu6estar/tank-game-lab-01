@@ -111,12 +111,18 @@ export class Ship extends Entity {
     }
 
     this.world.spawn(bullet);
+    this.world.emit('fired', { team: this.team, pos: bullet.pos });
     return true;
+  }
+
+  /** Щит робить корабель невразливим. */
+  get invulnerable() {
+    return this.has('shield');
   }
 
   /** Повертає true, якщо саме цей удар знищив корабель. */
   takeDamage(amount) {
-    if (!this.alive || this.has('shield')) return false;
+    if (!this.alive || this.invulnerable) return false;
 
     this.#hp = Math.max(0, this.#hp - amount);
     if (this.#hp > 0) return false;

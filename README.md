@@ -1,150 +1,183 @@
-# Tank Arena — Lab 02
+# Tank Arena — Lab 03
 
-Лабораторна робота 02 з JavaScript: **об'єкти, прототипи та `this` — модель сутностей**.
+Лабораторна 03: **асинхронний JavaScript — Promises, `async/await` і екран завантаження**.
 
-Продовження гри з lab-01 (fixed timestep, інтерполяція, HUD): танк став класом `Ship extends Entity`, з'явилися світ на `Map`, кулі, астероїди, колізії, вибухи, респаун, рахунок, а також homing і pickup-и, зроблені композицією.
-
-Нотатки та експерименти першої лаби: [docs/lab-01.md](docs/lab-01.md).
+Гра з lab-01/02 тепер стартує не одразу: спершу завантажуються спрайти й звуки (з прогрес-баром), потім гравець бачить лобі з кімнатами, обирає одну — і лише тоді починається гра. Нотатки попередніх лаб: [docs/lab-01.md](docs/lab-01.md), [docs/lab-02.md](docs/lab-02.md).
 
 ## Запуск
 
 ```bash
 npm install
-npm run dev
+npm run dev        # http://localhost:5173
+npm test           # 73 тести (node:test)
+npm run lint
+npm run build
 ```
 
-Інші команди: `npm run lint`, `npm run build`, `npm run exp:this`, `npm run exp:proto`.
+Експерименти: `npm run exp:timing`, `npm run exp:puzzles`, `npm run exp:failures`.
 
-## Керування
+Керування: `↑↓←→` рух, `Z/X` башта, `Space` постріл, `M` звук, `Esc` назад у лобі.
 
-- `↑` / `↓` — рух вперед / назад
-- `←` / `→` — поворот корпусу
-- `Z` / `X` — поворот башти вліво / вправо
-- `Space` — постріл (з кінця ствола, куля успадковує швидкість танка)
-
-## Правила гри
-
-- Арена, ти (зелений танк) і два ворожі танки (червоні, стріляють у тебе).
-- Кулі б'ють кораблі й астероїди (20 шкоди). У гравця 100 HP, у ворога 60. По своїх кулі не б'ють.
-- Астероїд, що влетів у танк, розбивається і завдає 25 шкоди. Червоні астероїди з обводкою — «переслідувачі» (homing).
-- Знищений корабель вибухає (частинки) і респауниться через 2 с у випадковому безпечному місці, на 2 с зі щитом.
-- Рахунок: ворожий танк — 100, астероїд — 10, астероїд-переслідувач — 25.
-- Pickup-и (зникають через 15 с): **S** щит 6 с, **R** rapid fire 8 с (перезарядка ×0,35), **H** homing-постріли 8 с.
-
-## Структура
+## Потік гри
 
 ```text
-src/
-  main.js, loop.js, input.js, render.js   цикл, ввід, Canvas (з lab-01) + HUD
-  sim/
-    vector.js       Vector2 — чисті методи
-    entity.js       Entity: id (#лічильник), pos/vel/radius/kind, update, компоненти
-    ship.js         Ship extends Entity: #hp, get hp(), fire()
-    bullet.js       Bullet extends Entity (TTL)
-    asteroid.js     Asteroid extends Entity
-    pickup.js       Pickup extends Entity
-    explosion.js    Explosion extends Entity (частинки)
-    components.js   Homing, Effect — компоненти (композиція)
-    world.js        World поверх Map<id, Entity>
-    collision.js    система колізій коло-коло (окремий модуль)
-    controllers.js  керування кораблем: гравець / ворожий AI
-    game.js         правила: рахунок, респаун, поповнення арени
-experiments/        консольні експерименти (this, ланцюжок прототипів)
-docs/lab-01.md      README першої лаби
+boot → завантаження (прогрес-бар) → лобі (GET /api/rooms, опитування) → гра → Esc → лобі
+            │ помилка → екран помилки + «Повторити»      │ помилка → статус + «Повторити»
 ```
 
-## Модель сутностей
-
-Ієрархія навмисно мілка, **один рівень наслідування**:
+## Що де лежить
 
 ```text
-Entity
-├── Ship        (колишній танк з lab-01)
-├── Bullet
-├── Asteroid
-├── Pickup
-└── Explosion
+public/assets/manifest.json     список ассетів (key, type, url, optional)
+public/assets/sprites.{png,json}   атлас спрайтів + прив'язки (pivot)
+public/assets/*.wav             shoot / hit / explosion
+public/api/rooms.json           «сервер» лобі (Vite віддає як /api/rooms)
+src/assets/loader.js            fetchJson, withRetry, loadImage/Audio/Json, loadAll
+src/loading-screen.js           екран завантаження (canvas-прогрес-бар)
+src/lobby.js                    class Lobby extends EventTarget (логіка)
+src/lobby-ui.js                 DOM лобі (окремо від логіки)
+src/audio.js, src/hud.js        підписники на події симуляції
+src/sim/*                       симуляція; НЕ імпортує audio/hud
+src/dev/chaos.js                ?chaos=… — навмисні збої для перевірки
+tools/generate-assets.py        детермінований генератор спрайтів і звуків
 ```
 
-- **`Vector2`** — усі методи чисті (`add`, `sub`, `scale`, `normalize`, `rotate`, `dot`, `length`, `fromAngle`) і повертають новий вектор. Тому `entity.pos = entity.pos.add(...)` — це заміна посилання, і `prevPos` для інтерполяції лишається недоторканим. Рішення щодо мутації: **вектори незмінні, поля сутностей змінюються на місці**.
-- **`Entity`** — `id`, `pos`, `vel`, `angle`, `radius`, `alive`, `kind`, `update(dt)`. `id` видається з приватного статичного лічильника `static #nextId` і доступний лише для читання через getter. `update` — шаблонний метод: підкласи перевизначають лише `behave` (і `snapshot`, якщо мають власний стан для інтерполяції).
-- **`Ship`** — `#hp` приватний, назовні тільки `get hp()`; змінити HP можна лише через `takeDamage()`.
-- **`World`** тримає `Map<id, Entity>`. Чому `Map`, а не `{}`: числові ключі лишаються числами, немає успадкованих ключів (`constructor`, `toString`), є `.size`, порядок вставки гарантований, зручно ітерувати. `spawn` додає одразу, `despawn` лише **позначає** сутність мертвою, а фізично її видаляє `sweep` наприкінці `step` — так ми не ламаємо ітерацію по `Map`, яка саме йде. Є `[Symbol.iterator]` (живі сутності) і генератор `*ofKind(kind)`.
-- **`World.step(dt, inputs)`**: оновити всіх → колізії → sweep мертвих. Колізії — окрема функція, її можна підмінити через `new World({ collisionSystem })`.
-- **Колізії** (`collision.js`) — наївний O(n²) коло-коло, обробники за парою видів (`bullet|ship`, `asteroid|ship`, ...). Вибухи мають `radius = 0` і в колізіях не беруть участі.
+## M1. Завантажувач
 
-## Баг з `this` при стрільбі
+- Усі завантажувачі приймають `AbortSignal`: `loadJson`, `loadImage`, `loadAudio`.
+- Спільний `fetchJson`/`fetchChecked` **перевіряє `response.ok`**: `fetch` не кидає помилку на 404/500, тож без цього «успіхом» вважався б HTML зі сторінкою помилки.
+- `withRetry`: експоненційний backoff з повним jitter, `delay = random() × min(maxMs, baseMs × 2^(спроба−1))` (jitter — щоб клієнти не повторювали запити синхронно).
+- **Що ретраїмо:** 5xx, мережеву помилку (`TypeError`), таймаут. **Не ретраїмо:** 4xx (файл не з'явиться від повтору), битий JSON, помилку декодування, скасування користувачем.
+- `loadAll` — `Promise.all` з прогресом по кожному файлу. `Promise.all` **не скасовує** сусідів при першій відмові, тому `loadAll` сам абортить спільний `AbortController`, щоб решта не качалась даремно.
+- Звуки в маніфесті `optional` — їхня відсутність не валить гру (HUD чесно пише «гра без звуку»).
+- Гра стартує лише після `await loadAll(...)`; прогрес-бар малюється на справжньому `<canvas>` за реальною часткою завершених файлів.
 
-### Баг
+### Sequential `await` vs concurrent `Promise.all`
+
+`npm run exp:timing` — ті самі 5 файлів з локального сервера з затримкою 200 мс на файл:
+
+| стратегія                 | час         | пояснення                |
+| ------------------------- | ----------- | ------------------------ |
+| `for … await` по черзі    | **1057 мс** | сума затримок: 5 × 200   |
+| `loadAll` (`Promise.all`) | **213 мс**  | максимум затримок: ≈ 200 |
+
+Прискорення ×5 = кількості файлів. Мережа чекає паралельно, а sequential-цикл простоює між запитами. (Ліміт ~6 з'єднань на хост у HTTP/1.1 обмежив би виграш при десятках файлів — у нас їх 5.)
+
+## M2. Спрайти, звук, події
+
+- Кораблі, кулі й астероїди малюються `drawImage` з **вирізкою зі спрайт-листа** (`sx, sy, sw, sh`) і pivot-ом з `sprites.json`; поворот — навколо pivot.
+- Звук — **Web Audio**: один `AudioContext`, створений «suspended»; `resume()` викликається першим жестом (клік/клавіша/Join). Буфери декодуються (`decodeAudioData`) ще на екрані завантаження. Кожен постріл — новий дешевий `AudioBufferSourceNode`, тож постріли накладаються.
+- Симуляція **не імпортує** `audio.js` і `hud.js` (правило ESLint `no-restricted-imports` для `src/sim`). `World` — `EventTarget`, що диспатчить `CustomEvent`: `fired`, `hit`, `exploded` (+ `pickup`); `Game` додає `scoreChanged`. `audio.bind(world)` і `hud.bindGame(game)` просто підписуються.
+
+## M3. Лобі
+
+- `GET /api/rooms` — статичний `public/api/rooms.json`, Vite віддає його під цією адресою (`vite.config.js`, плагін-middleware).
+- `class Lobby extends EventTarget` — `refresh()`, `join(roomId)`, подія `roomsChanged`. DOM-код у окремому `lobby-ui.js`: логіку можна тестувати без браузера.
+- Поки лобі видиме, список оновлюється кожні 4 с; у грі опитування зупиняється, після `Esc` — відновлюється.
+- Кожен запит має `AbortSignal.timeout`; при виході з лобі/старті гри запит скасовується.
+- Помилки: 404/500/таймаут/битий JSON → зрозуміле повідомлення + кнопка «Повторити»; заповнена кімната недоступна для вибору.
+
+## M4. Головоломки: мікрозадачі проти задач
+
+Усі п'ять придумані мною; вивід **записаний у коді й перевіряється запуском** (`npm run exp:puzzles`; п'ята — у Chromium).
+
+**1. `await` ріже функцію навпіл**
 
 ```js
-window.addEventListener('keydown', ship.fire); // ❌
+async function load() {
+  log('A');
+  await null;
+  log('C');
+}
+load();
+Promise.resolve().then(() => log('E'));
+log('B');
+log('D');
 ```
 
-`ship.fire` передається як **значення функції**, без об'єкта. Коли браузер викликає слухача, він робить `listener.call(currentTarget, event)`: усередині `this` — це `window`, а не корабель. Тож `this.cooldown`, `this.getComponent`, `this.pos` читаються з `window`. Результат (повністю відтворюється командою `npm run exp:this`):
+Вивід: `A B D C E`. Тіло async-функції біжить синхронно до першого `await`; решта — мікрозадача, що стала в чергу раніше за пізніший `.then`.
 
-```text
-0. ship.fire напряму   : TypeError: this.getComponent is not a function
+**2. `setTimeout` усередині `.then`**
+
+```js
+log('start');
+setTimeout(() => log('timeout 0'), 0);
+Promise.resolve()
+  .then(() => {
+    log('then 1');
+    setTimeout(() => log('timeout in then'), 0);
+  })
+  .then(() => log('then 2'));
+log('sync end');
 ```
 
-Метод «пам'ятає» клас, але не екземпляр: `this` визначається **місцем виклику**, а не місцем оголошення.
+Вивід: `start sync end then 1 then 2 timeout 0 timeout in then`. Усі мікрозадачі виконуються до першого таймера; таймери — у порядку створення.
 
-### Фікси
+**3. `return Promise` з async-функції коштує зайві тики**
 
-| Фікс                 | Як                                                      | Мінус                                                                                                                                                                      |
-| -------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Стрілка-обгортка ✅  | `addEventListener('keydown', () => game.player.fire())` | Анонімна функція: її важче зняти через `removeEventListener`, якщо не зберегти посилання.                                                                                  |
-| `bind`               | `ship.fire.bind(ship)`                                  | Створює нову функцію, прив'язану до **конкретного** корабля. Після респауну це вже мертвий корабель, потрібно прив'язувати заново.                                         |
-| Поле-стрілка в класі | `fire = () => { ... }`                                  | Метод стає власністю кожного екземпляра, а не живе на прототипі. Тисяча об'єктів — тисяча копій функції (`npm run exp:this` показує, що `a.fire === b.fire` стає `false`). |
-
-**Обрано стрілку-обгортку** (`src/main.js`): гравець змінюється при респауні, а обгортка бере `game.player` у момент натискання, тому завжди стріляє з актуального корабля, а `fire` лишається звичайним методом на прототипі. Усередині `fire()` теж є стрілка: `accepts: (target) => target.team !== this.team` — вона бере `this` (корабель) лексично, тому коректно працює у callback-у.
-
-Чотири правила `this` у порядку пріоритету: `new` → explicit (`call`/`apply`/`bind`) → implicit (`obj.method()`) → default (`undefined` у strict mode). Стрілки не мають власного `this` і беруть його з оточення, тому `bind` на них не діє.
-
-## Дизайн-запис: композиція замість ієрархії
-
-**Задача.** Дві фічі, які розривають дерево класів: _homing_ (потрібен і кулі, і астероїду) та _pickup_ (стоїть на місці, колізиться, але не корабель; дає ефекти на кшталт щита і rapid fire).
-
-**Як виглядала б ієрархія.** Природна спроба: `Entity → MovingEntity → Bullet / Asteroid / Ship`. Тоді homing:
-
-- `HomingBullet extends Bullet` і `HomingAsteroid extends Asteroid` — той самий алгоритм наведення в двох місцях, копіпаста;
-- або `HomingEntity` посередині — але тоді _кожна_ куля й астероїд мусять бути його нащадками, навіть ті, що нікуди не наводяться;
-- pickup не рухається, тож `MovingEntity` йому не підходить, і виходить окрема гілка, яка дублює колізійну логіку;
-- ефекти: щит, rapid fire, homing-постріли можуть діяти в будь-якій комбінації. Це `ShieldedShip`, `RapidFireShip`, `ShieldedRapidFireShip`... 2ⁿ класів, до того ж ефект зникає за таймером, а клас об'єкта змінити в рантаймі не можна.
-
-**Обраний підхід: явні компоненти.** Будь-яка сутність може отримати компонент: `entity.attach('homing', new Homing({...}))`, а `Entity.update` щокроку викликає `component.update(entity, dt, world)`. Компонент нічого не знає про клас власника, лише читає `pos`/`vel` і питає світ про цілі:
-
-- `Homing` висить і на кулях (коли активний pickup **H**), і на астероїдах-переслідувачах (кожен новий астероїд з імовірністю 30%, але не більше двох одночасно), один клас на обидва випадки;
-- `Pickup` — це `Entity` з полем `type`. При дотику з кораблем система колізій створює `Effect` (щит, rapid fire, homing-постріли) і причіплює його до корабля. Зі спливом таймера `Effect` сам себе знімає (`detach`);
-- `Ship.fire()` і `Ship.takeDamage()` лише питають `has('shield')` / `getComponent('rapidFire')`. Щит після респауну — той самий компонент, що й із pickup-а.
-
-**Чому не інші техніки.** _Міксини через spread_ (`{ ...position(), ...weapon() }`) копіюють властивості в момент створення, їх неможливо зняти за таймером. _Behavior-as-data_ (`{ kind, ttl, damage }` + `switch`) зрештою перетворюється на гігантський `switch` в одній функції, куди треба додавати гілку на кожну нову поведінку. Компоненти додаються та знімаються в рантаймі, а кожна поведінка живе у своєму місці.
-
-**Ціна.** Імена компонентів — рядки: помилка в імені мовчки нічого не зробить. `Ship` знає імена ефектів, тож зв'язок є, просто слабший за спадкування. Порядок виклику компонентів — порядок вставки в `Map`. Тому наслідування лишилося для питання «що це за сутність» (один рівень), а композиція — для питання «що вона зараз вміє».
-
-## Експеримент: ланцюжок прототипів
-
-`npm run exp:proto` (вивід скорочено):
-
-```text
-ланцюжок: ship  ->  Ship.prototype  ->  Entity.prototype  ->  Object.prototype  ->  null
-
-ship.fire:      власні властивості: немає -> Ship.prototype: ЗНАЙДЕНО
-ship.update:    власні властивості: немає -> Ship.prototype: немає -> Entity.prototype: ЗНАЙДЕНО
-ship.toString:  ... -> Entity.prototype: немає -> Object.prototype: ЗНАЙДЕНО
-
-bulletA.update === bulletB.update: true      // метод один, куль може бути тисяча
-власний update у кулі? false                 // у кулі лише дані, а поведінка береться пошуком
+```js
+async function viaReturn() {
+  return Promise.resolve('async result');
+}
+viaReturn().then(log);
+Promise.resolve()
+  .then(() => log('p'))
+  .then(() => log('q'))
+  .then(() => log('r'));
+log('sync');
 ```
 
-`class` не копіює методи в екземпляри: усі кулі посилаються на один `Entity.prototype.update`.
+Вивід: `sync p q async result r`. Проміс-обгортка чекає на thenable ще кілька тиків, тож `p→q` встигають раніше, а `r` — після.
 
-## Git
+**4. `catch → finally → then`, таймер останній**
 
-```bash
-git add .
-git commit -m "Implement lab-02: entities, world, collisions, composition"
-git tag lab-02
-git push origin main
-git push origin lab-02
+```js
+Promise.reject(new Error('boom'))
+  .then(() => log('SKIPPED'))
+  .catch(() => log('2 catch'))
+  .finally(() => log('3 finally'))
+  .then(() => log('4 after finally'));
+setTimeout(() => log('5 timeout'), 0);
+log('1');
 ```
+
+Вивід: `1 2 catch 3 finally 4 after finally 5 timeout`. Відмова проскакує повз `then`, `catch` її «лікує», `finally` значення не змінює; усе це мікрозадачі — таймер у кінці.
+
+**5. `requestAnimationFrame` ([experiments/puzzle-raf.html](experiments/puzzle-raf.html))**
+
+```js
+requestAnimationFrame(() => {
+  log('raf 1');
+  Promise.resolve().then(() => log('micro (з raf 1)'));
+});
+requestAnimationFrame(() => log('raf 2'));
+Promise.resolve().then(() => log('micro (sync)'));
+log('sync');
+```
+
+Вивід (Chromium): `sync micro (sync) raf 1 micro (з raf 1) raf 2`. Мікрозадачі виконуються після **кожного** колбека, тому між `raf 1` і `raf 2` встигає `micro`.
+
+## M4. Галерея збоїв
+
+Гра не падає, не стартує зламаною і завжди пропонує вихід. У браузері збої відтворюються `?chaos=…` (див. `src/dev/chaos.js`), у Node — `npm run exp:failures`.
+
+| Збій                       | Що бачить гравець                                            | Мережа / поведінка                              | Скриншот                                                |
+| -------------------------- | ------------------------------------------------------------ | ----------------------------------------------- | ------------------------------------------------------- |
+| 404 спрайта                | екран помилки + «Повторити»                                  | **1 запит**, без ретраїв (`?chaos=sprite404:1`) | [failure-1](docs/screenshots/failure-1-sprite-404.png)  |
+| 404 звуку (optional)       | гра стартує, у HUD «без звуку»                               | не валить завантаження                          | [failure-1b](docs/screenshots/failure-1b-audio-404.png) |
+| таймаут `/api/rooms`       | «сервер не відповів вчасно» + «Повторити», потім саме одужує | `AbortSignal.timeout`                           | [failure-2](docs/screenshots/failure-2-timeout.png)     |
+| abort посеред завантаження | екран «скасовано» + «Повторити»                              | запити скасовані, гра не стартує сама           | [failure-3](docs/screenshots/failure-3-abort.png)       |
+| битий JSON                 | «пошкоджені дані»; для атласу — екран помилки                | **1 запит**, не ретраїмо                        | [failure-4](docs/screenshots/failure-4-bad-json.png)    |
+| 503 (нестабільний сервер)  | прогрес повільно йде вперед                                  | ретраї з backoff, 10 ретраїв на 5 файлів, ~2 с  | [failure-5](docs/screenshots/failure-5-flaky-retry.png) |
+
+Усі 8 сценаріїв пройшли у справжньому Chromium (Playwright): без необроблених винятків.
+
+## Захист: Reflection
+
+1. **Чому `fetch` не кидає помилку на 404?** Проміс відхиляється лише при мережевому збої; HTTP-відповідь — теж успіх транспорту. Тому `ok` перевіряємо самі.
+2. **Чому `Promise.all` не скасовує решту при відмові?** Проміси не скасовуються — лише результат. Скасування — окремий механізм (`AbortController`), тому `loadAll` абортить спільний сигнал.
+3. **Чому retry без jitter шкодить?** Усі клієнти після збою повторюють запит в один момент і знову перевантажують сервер; jitter розмазує їх у часі.
+
+## Теги
+
+Тег: `lab-03`.

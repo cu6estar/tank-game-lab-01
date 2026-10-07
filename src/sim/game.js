@@ -8,39 +8,79 @@ import { Vector2 } from './vector.js';
 
 const RESPAWN_DELAY = 2; // секунд
 const SPAWN_SHIELD = 2; // секунд невразливості після респауну
-const ENEMY_COUNT = 2;
-const ASTEROID_TARGET = 6;
-const MAX_HOMING_ASTEROIDS = 2;
 const ASTEROID_INTERVAL = 2;
-const PICKUP_INTERVAL = 8;
-const MAX_PICKUPS = 2;
 
 const SCORE_ENEMY = 100;
 const SCORE_ASTEROID = 10;
 const SCORE_HOMING_ASTEROID = 25;
 
 /**
+ * Конфіг арени. Приходить із кімнати лобі (`room.arena` у /api/rooms),
+ * тобто з мережі — тому кожне поле обмежене розумним діапазоном.
+ */
+export const DEFAULT_ARENA = Object.freeze({
+  enemies: 2,
+  asteroids: 6,
+  maxHomingAsteroids: 2,
+  homingChance: 0.3,
+  pickupIntervalSec: 8,
+  maxPickups: 2,
+});
+
+const ARENA_LIMITS = {
+  enemies: [0, 6],
+  asteroids: [0, 20],
+  maxHomingAsteroids: [0, 6],
+  homingChance: [0, 1],
+  pickupIntervalSec: [2, 60],
+  maxPickups: [0, 5],
+};
+
+export function normalizeArena(arena = {}) {
+  const result = { ...DEFAULT_ARENA };
+
+  for (const [key, [min, max]] of Object.entries(ARENA_LIMITS)) {
+    const value = arena?.[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      result[key] = Math.min(max, Math.max(min, value));
+    }
+  }
+  return result;
+}
+
+/**
  * Правила гри поверх World: рахунок, респаун кораблів через 2 с,
  * поповнення астероїдів та pickup-ів. World нічого про це не знає —
- * він лише кидає події (`world.events`), а Game їх читає.
+ * він лише сповіщає ('exploded'), а Game підписаний на ці події.
+ *
+ * Сам Game теж EventTarget: про зміну рахунку він повідомляє подією
+ * 'scoreChanged', а HUD слухає її і не імпортується в sim.
  */
-export class Game {
+export class Game extends EventTarget {
   #respawns = []; // { timer, team }
   #asteroidTimer = 0;
-  #pickupTimer = PICKUP_INTERVAL;
+  #pickupTimer;
   #rand;
 
-  constructor({ width, height, rand = Math.random }) {
+  constructor({ width, height, rand = Math.random, arena } = {}) {
+    super();
     this.#rand = rand;
+    this.arena = normalizeArena(arena);
+    this.#pickupTimer = this.arena.pickupIntervalSec;
     this.world = new World({ width, height });
     this.player = null;
     this.score = 0;
+
+    // Стрілка зберігає `this` (Game) — звичайний метод у слухачі його б втратив.
+    this.world.addEventListener('exploded', (event) =>
+      this.#onExploded(event.detail),
+    );
   }
 
   start() {
     this.#spawnShip('player');
-    for (let i = 0; i < ENEMY_COUNT; i++) this.#spawnShip('enemy');
-    for (let i = 0; i < ASTEROID_TARGET; i++) this.#spawnAsteroid();
+    for (let i = 0; i < this.arena.enemies; i++) this.#spawnShip('enemy');
+    for (let i = 0; i < this.arena.asteroids; i++) this.#spawnAsteroid();
   }
 
   resize(width, height) {
@@ -55,27 +95,29 @@ export class Game {
 
   step(dt, inputs) {
     this.world.step(dt, inputs);
-    this.#handleEvents();
     this.#tickRespawns(dt);
     this.#refill(dt);
   }
 
-  #handleEvents() {
-    for (const event of this.world.events) {
-      if (event.type !== 'destroyed') continue;
-
-      const { entity, killerTeam } = event;
-
-      if (entity.kind === 'ship') {
-        if (entity === this.player) this.player = null;
-        this.#respawns.push({ timer: RESPAWN_DELAY, team: entity.team });
-        if (killerTeam === 'player') this.score += SCORE_ENEMY;
-      } else if (entity.kind === 'asteroid' && killerTeam === 'player') {
-        this.score += entity.has('homing')
-          ? SCORE_HOMING_ASTEROID
-          : SCORE_ASTEROID;
-      }
+  #onExploded({ entity, killerTeam }) {
+    if (entity.kind === 'ship') {
+      if (entity === this.player) this.player = null;
+      this.#respawns.push({ timer: RESPAWN_DELAY, team: entity.team });
+      if (killerTeam === 'player') this.#addScore(SCORE_ENEMY);
+    } else if (entity.kind === 'asteroid' && killerTeam === 'player') {
+      this.#addScore(
+        entity.has('homing') ? SCORE_HOMING_ASTEROID : SCORE_ASTEROID,
+      );
     }
+  }
+
+  #addScore(delta) {
+    this.score += delta;
+    this.dispatchEvent(
+      new CustomEvent('scoreChanged', {
+        detail: { score: this.score, delta },
+      }),
+    );
   }
 
   #tickRespawns(dt) {
@@ -106,15 +148,15 @@ export class Game {
     }
 
     this.#asteroidTimer -= dt;
-    if (asteroids < ASTEROID_TARGET && this.#asteroidTimer <= 0) {
+    if (asteroids < this.arena.asteroids && this.#asteroidTimer <= 0) {
       this.#spawnAsteroid();
       this.#asteroidTimer = ASTEROID_INTERVAL;
     }
 
     this.#pickupTimer -= dt;
-    if (pickups < MAX_PICKUPS && this.#pickupTimer <= 0) {
+    if (pickups < this.arena.maxPickups && this.#pickupTimer <= 0) {
       this.#spawnPickup();
-      this.#pickupTimer = PICKUP_INTERVAL;
+      this.#pickupTimer = this.arena.pickupIntervalSec;
     }
   }
 
@@ -137,7 +179,8 @@ export class Game {
     const radius = 20 + this.#rand() * 26;
     const heading = this.#rand() * Math.PI * 2;
     const homing =
-      this.#countHomingAsteroids() < MAX_HOMING_ASTEROIDS && this.#rand() < 0.3;
+      this.#countHomingAsteroids() < this.arena.maxHomingAsteroids &&
+      this.#rand() < this.arena.homingChance;
 
     const asteroid = new Asteroid({
       pos: this.#safePosition(radius, 160),

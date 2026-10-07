@@ -15,8 +15,16 @@ function wrapCoordinate(value, size) {
  * Видалення відкладене: despawn() лише ПОЗНАЧАЄ сутність мертвою, а фізично
  * вона видаляється в sweep() наприкінці кроку. Так ми ніколи не ламаємо
  * ітерацію, яка зараз іде по цій самій Map.
+ *
+ * Шина подій: World — це EventTarget. Симуляція лише повідомляє, що сталося
+ * (`emit('fired' | 'hit' | 'exploded' | 'pickup', detail)`), а звук, HUD та
+ * правила гри підписуються ззовні. Модулі sim НЕ імпортують audio.js / hud.js
+ * (це перевіряє ESLint і тест), залежність спрямована лише в один бік.
+ *
+ * Події синхронні: слухач виконується всередині dispatchEvent, посеред кроку.
+ * Тому слухачі мають бути швидкими й не чіпати World.
  */
-export class World {
+export class World extends EventTarget {
   #entities = new Map();
 
   constructor({
@@ -24,12 +32,12 @@ export class World {
     height = 600,
     collisionSystem = resolveCollisions,
   } = {}) {
+    super();
     this.width = width;
     this.height = height;
     // Колізії — окрема система, яку можна підмінити (напр. на сітку замість O(n²)).
     this.collisionSystem = collisionSystem;
     this.inputs = null; // вводи поточного кроку, їх читають контролери
-    this.events = []; // події поточного кроку ({ type: 'destroyed', ... })
     this.time = 0;
   }
 
@@ -58,8 +66,9 @@ export class World {
     return this.#entities.get(id);
   }
 
-  emit(event) {
-    this.events.push(event);
+  /** Повідомити світу: `world.emit('fired', { team, pos })`. */
+  emit(type, detail = {}) {
+    this.dispatchEvent(new CustomEvent(type, { detail }));
   }
 
   /** Ітерація по ЖИВИХ сутностях (позначені мертвими пропускаються). */
@@ -82,7 +91,6 @@ export class World {
    */
   step(dt, inputs = null) {
     this.inputs = inputs;
-    this.events.length = 0;
     this.time += dt;
 
     for (const entity of this) {

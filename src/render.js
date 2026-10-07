@@ -3,20 +3,11 @@ const TAU = Math.PI * 2;
 // Шари: що малюється раніше, те лежить нижче.
 const DRAW_ORDER = ['pickup', 'asteroid', 'ship', 'bullet', 'explosion'];
 
-const SHIP_PALETTES = {
-  player: {
-    hull: '#4f7f45',
-    deck: '#6f9c5e',
-    turret: '#3d6337',
-    barrel: '#293f25',
-  },
-  enemy: {
-    hull: '#8a4a3a',
-    deck: '#b0665a',
-    turret: '#6b3329',
-    barrel: '#43201a',
-  },
-};
+// Спрайт астероїда трохи більший за його коло зіткнень: скеля неправильної
+// форми, а коло зіткнень — вписане. 96 = половина кадру в пікселях атласу.
+const ASTEROID_SPRITE_FIT = 1.22;
+const ASTEROID_SPRITE_HALF = 96;
+const ASTEROID_VARIANTS = 3;
 
 const PICKUP_STYLES = {
   shield: { color: '#3fd0ff', label: 'S' },
@@ -29,6 +20,9 @@ export function createRenderer(canvas) {
 
   let width = 0;
   let height = 0;
+
+  // { image, frames, scale } — з'являється після завантаження ассетів
+  let sprites = null;
 
   const drawers = {
     pickup: drawPickup,
@@ -52,10 +46,16 @@ export function createRenderer(canvas) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
+  /** Підключити спрайтшит: `image` — ImageBitmap, `atlas` — sprites.json. */
+  function setSprites({ image, atlas }) {
+    sprites = { image, frames: atlas.frames, scale: atlas.scale ?? 1 };
+  }
+
   function draw(world, alpha) {
     ctx.clearRect(0, 0, width, height);
 
     drawArena();
+    if (!sprites || !world) return; // у лобі гри ще немає — лише фон
 
     for (const kind of DRAW_ORDER) {
       for (const entity of world.ofKind(kind)) {
@@ -88,6 +88,33 @@ export function createRenderer(canvas) {
     }
   }
 
+  /**
+   * Один кадр із спрайтшиту: `drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh)`.
+   * Джерело — прямокутник атласу, ціль — той самий розмір, помножений на
+   * `k` (скільки логічних одиниць гри в одному пікселі спрайта) і зсунутий
+   * так, щоб точка обертання кадру (ax, ay) опинилась в (x, y).
+   */
+  function drawFrame(name, x, y, rotation, k = 1 / sprites.scale) {
+    const frame = sprites.frames[name];
+    if (!frame) return;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.drawImage(
+      sprites.image,
+      frame.x,
+      frame.y,
+      frame.w,
+      frame.h,
+      -frame.ax * k,
+      -frame.ay * k,
+      frame.w * k,
+      frame.h * k,
+    );
+    ctx.restore();
+  }
+
   function drawShip(ship, alpha) {
     const { x, y } = interpolatedPos(ship, alpha);
     const angle = lerpAngle(ship.prevAngle, ship.angle, alpha);
@@ -96,40 +123,11 @@ export function createRenderer(canvas) {
       ship.turretAngle,
       alpha,
     );
-    const palette = SHIP_PALETTES[ship.team] ?? SHIP_PALETTES.enemy;
+    const team = ship.team === 'player' ? 'player' : 'enemy';
 
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
-
-    // Гусениці
-    ctx.fillStyle = '#111';
-    ctx.fillRect(-28, -25, 56, 12);
-    ctx.fillRect(-28, 13, 56, 12);
-
-    // Корпус
-    ctx.fillStyle = palette.hull;
-    ctx.fillRect(-24, -18, 48, 36);
-
-    ctx.fillStyle = palette.deck;
-    ctx.fillRect(-15, -13, 30, 26);
-
-    ctx.restore();
-
-    // Башта обертається незалежно від корпусу
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(turretAngle);
-
-    ctx.fillStyle = palette.turret;
-    ctx.beginPath();
-    ctx.arc(0, 0, 15, 0, TAU);
-    ctx.fill();
-
-    ctx.fillStyle = palette.barrel;
-    ctx.fillRect(0, -4, 38, 8);
-
-    ctx.restore();
+    // Корпус і башта — окремі кадри: башта обертається незалежно від корпусу.
+    drawFrame(`hull_${team}`, x, y, angle);
+    drawFrame(`turret_${team}`, x, y, turretAngle);
 
     drawShieldRing(ship, x, y);
     drawHealthBar(ship, x, y);
@@ -140,8 +138,12 @@ export function createRenderer(canvas) {
     if (!shield) return;
 
     // Блимає, коли щит на межі зникнення.
-    if (shield.remaining < 1.5 && Math.floor(performance.now() / 120) % 2 === 0)
+    if (
+      shield.remaining < 1.5 &&
+      Math.floor(performance.now() / 120) % 2 === 0
+    ) {
       return;
+    }
 
     ctx.save();
     ctx.strokeStyle = 'rgba(63, 208, 255, 0.9)';
@@ -171,50 +173,26 @@ export function createRenderer(canvas) {
   function drawAsteroid(asteroid, alpha) {
     const { x, y } = interpolatedPos(asteroid, alpha);
     const angle = lerpAngle(asteroid.prevAngle, asteroid.angle, alpha);
-    const seeker = asteroid.has('homing');
 
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
+    const name = asteroid.has('homing')
+      ? 'asteroid_seeker'
+      : `asteroid_${asteroid.id % ASTEROID_VARIANTS}`;
 
-    ctx.beginPath();
-    asteroid.shape.forEach((vertex, i) => {
-      if (i === 0) ctx.moveTo(vertex.x, vertex.y);
-      else ctx.lineTo(vertex.x, vertex.y);
-    });
-    ctx.closePath();
-
-    ctx.fillStyle = seeker ? '#6b3030' : '#5a5148';
-    ctx.strokeStyle = seeker ? '#ff6a5a' : '#8d8274';
-    ctx.lineWidth = seeker ? 3 : 2;
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.restore();
+    // розмір підганяємо під коло зіткнень, а не під фіксований масштаб атласу
+    const k = (asteroid.radius * ASTEROID_SPRITE_FIT) / ASTEROID_SPRITE_HALF;
+    drawFrame(name, x, y, angle, k);
   }
 
   function drawBullet(bullet, alpha) {
     const { x, y } = interpolatedPos(bullet, alpha);
-    const heading = bullet.vel.angle();
-    const homing = bullet.has('homing');
-    const color = homing
-      ? '#ff5fd2'
+
+    const name = bullet.has('homing')
+      ? 'bullet_homing'
       : bullet.team === 'player'
-        ? '#ffe56a'
-        : '#ff7a5a';
+        ? 'bullet_player'
+        : 'bullet_enemy';
 
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(x - Math.cos(heading) * 12, y - Math.sin(heading) * 12);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(x, y, bullet.radius, 0, TAU);
-    ctx.fill();
+    drawFrame(name, x, y, bullet.vel.angle());
   }
 
   function drawPickup(pickup, alpha) {
@@ -292,12 +270,14 @@ export function createRenderer(canvas) {
   resize();
 
   return {
+    ctx,
     get width() {
       return width;
     },
     get height() {
       return height;
     },
+    setSprites,
     draw,
   };
 }

@@ -1,0 +1,55 @@
+[
+  {
+    "id": "training",
+    "name": "Тренувальний полігон",
+    "players": 1,
+    "maxPlayers": 8,
+    "arena": {
+      "enemies": 1,
+      "asteroids": 4,
+      "maxHomingAsteroids": 0,
+      "pickupIntervalSec": 6,
+      "maxPickups": 3
+    }
+  },
+  {
+    "id": "belt",
+    "name": "Астероїдний пояс",
+    "players": 3,
+    "maxPlayers": 8,
+    "arena": {
+      "enemies": 2,
+      "asteroids": 12,
+      "maxHomingAsteroids": 4,
+      "homingChance": 0.5,
+      "pickupIntervalSec": 8,
+      "maxPickups": 2
+    }
+  },
+  {
+    "id": "frontline",
+    "name": "Лінія фронту",
+    "players": 5,
+    "maxPlayers": 8,
+    "arena": {
+      "enemies": 4,
+      "asteroids": 5,
+      "maxHomingAsteroids": 1,
+      "pickupIntervalSec": 10,
+      "maxPickups": 2
+    }
+  },
+  {
+    "id": "duel",
+    "name": "Дуель (заповнена)",
+    "players": 2,
+    "maxPlayers": 2,
+    "arena": {
+      "enemies": 1,
+      "asteroids": 2,
+      "maxHomingAsteroids": 0,
+      "pickupIntervalSec": 12,
+      "maxPickups": 1
+    }
+  }
+]

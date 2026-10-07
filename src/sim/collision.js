@@ -30,11 +30,25 @@ export function findCollisions(entities) {
   return pairs;
 }
 
-/** Знищити сутність: позначити мертвою, вибух із частинок, подія для правил гри. */
+/**
+ * Знищити сутність: позначити мертвою, створити вибух із частинок і
+ * повідомити світу ('exploded'), щоб звук і правила гри відреагували.
+ */
 function destroy(world, entity, killerTeam = null) {
   entity.kill();
   world.spawn(new Explosion({ pos: entity.pos, size: entity.radius }));
-  world.emit({ type: 'destroyed', entity, killerTeam });
+  world.emit('exploded', {
+    entity,
+    kind: entity.kind,
+    team: entity.team ?? null,
+    pos: entity.pos,
+    killerTeam,
+  });
+}
+
+/** Влучання: чи завдано шкоди, чи її погасив щит ('blocked'). */
+function reportHit(world, target, { team, damage, blocked, pos }) {
+  world.emit('hit', { kind: target.kind, team, damage, blocked, pos });
 }
 
 /**
@@ -46,16 +60,30 @@ const HANDLERS = new Map([
     'asteroid|bullet',
     (asteroid, bullet, world) => {
       bullet.kill();
-      if (asteroid.takeDamage(bullet.damage))
-        destroy(world, asteroid, bullet.team);
+      const killed = asteroid.takeDamage(bullet.damage);
+      reportHit(world, asteroid, {
+        team: bullet.team,
+        damage: bullet.damage,
+        blocked: false,
+        pos: bullet.pos,
+      });
+      if (killed) destroy(world, asteroid, bullet.team);
     },
   ],
   [
     'asteroid|ship',
     (asteroid, ship, world) => {
       // Астероїд розбивається об корабель; щит гасить удар повністю.
+      const blocked = ship.invulnerable;
+      const killed = ship.takeDamage(ASTEROID_RAM_DAMAGE);
+      reportHit(world, ship, {
+        team: null,
+        damage: ASTEROID_RAM_DAMAGE,
+        blocked,
+        pos: ship.pos,
+      });
       destroy(world, asteroid);
-      if (ship.takeDamage(ASTEROID_RAM_DAMAGE)) destroy(world, ship);
+      if (killed) destroy(world, ship);
     },
   ],
   [
@@ -63,7 +91,15 @@ const HANDLERS = new Map([
     (bullet, ship, world) => {
       if (bullet.team === ship.team) return; // по своїх не б'ємо
       bullet.kill();
-      if (ship.takeDamage(bullet.damage)) destroy(world, ship, bullet.team);
+      const blocked = ship.invulnerable;
+      const killed = ship.takeDamage(bullet.damage);
+      reportHit(world, ship, {
+        team: bullet.team,
+        damage: bullet.damage,
+        blocked,
+        pos: bullet.pos,
+      });
+      if (killed) destroy(world, ship, bullet.team);
     },
   ],
   [
@@ -72,7 +108,11 @@ const HANDLERS = new Map([
       const effect = EFFECT_TYPES[pickup.type]();
       ship.attach(effect.name, effect);
       pickup.kill();
-      world.emit({ type: 'pickup', entity: pickup, ship });
+      world.emit('pickup', {
+        type: pickup.type,
+        team: ship.team,
+        pos: pickup.pos,
+      });
     },
   ],
 ]);

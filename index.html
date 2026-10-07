@@ -3,33 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tank Arena — Lab 02</title>
+    <title>Tank Arena — Lab 03</title>
   </head>
-  <body>
+  <body data-phase="loading">
     <main id="game">
       <canvas id="gameCanvas"></canvas>
+
       <div id="hud">
         <div>FPS: <span id="fps">0</span></div>
         <div>STEPS/S: <span id="steps">0</span></div>
         <div>FRAME: <span id="frame">0</span> ms</div>
       </div>
+
       <div id="scoreboard">
+        <div>ПІЛОТ: <span id="pilot">—</span></div>
         <div>РАХУНОК: <b id="score">0</b></div>
         <div>HP: <span id="hp">—</span></div>
         <div>ЕФЕКТИ: <span id="effects">—</span></div>
+        <div>ЗВУК: <span id="sound">—</span></div>
       </div>
+
       <div id="help">
         <b>Tank Arena</b><br />
         ↑/↓ — рух<br />
         ←/→ — поворот корпусу<br />
         Z/X — поворот башти<br />
         Space — постріл<br />
+        M — звук · Esc — до лобі<br />
         <span class="legend">
           <i style="color: #3fd0ff">S</i> щит ·
           <i style="color: #ffd23f">R</i> rapid fire ·
           <i style="color: #ff5fd2">H</i> homing-постріли
         </span>
       </div>
+
+      <!-- кнопки екрана завантаження (сам екран малюється на канвасі) -->
+      <div id="loading-actions" hidden>
+        <button type="button" data-action="cancel">Скасувати</button>
+        <button type="button" data-action="retry" hidden>Повторити</button>
+      </div>
+
+      <section id="lobby" class="overlay" hidden aria-labelledby="lobby-title">
+        <h1 id="lobby-title">TANK ARENA</h1>
+        <p class="subtitle">Лобі</p>
+
+        <form id="lobby-form" autocomplete="off">
+          <label class="field">
+            <span>Ім'я пілота</span>
+            <input
+              id="player-name"
+              name="name"
+              maxlength="16"
+              placeholder="Pilot"
+            />
+          </label>
+
+          <fieldset>
+            <legend>Кімната</legend>
+            <ul id="room-list" class="room-list"></ul>
+          </fieldset>
+
+          <p class="lobby-status" aria-live="polite">
+            <span id="lobby-status">Завантаження кімнат…</span>
+            <button type="button" id="lobby-retry" hidden>Повторити</button>
+          </p>
+
+          <button type="submit" id="join" disabled>Join</button>
+        </form>
+      </section>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>
