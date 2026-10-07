@@ -35,6 +35,30 @@ body {
   font-family: Consolas, monospace;
 }
 
+#scoreboard {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  min-width: 220px;
+  padding: 10px 14px;
+  color: #e9f5e5;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  line-height: 1.6;
+  font-family: Consolas, monospace;
+}
+
+#scoreboard b {
+  font-size: 1.3em;
+  color: #ffe56a;
+}
+
+.legend i {
+  font-style: normal;
+  font-weight: bold;
+}
+
 #help {
   position: fixed;
   right: 16px;

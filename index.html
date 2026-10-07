@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tank Arena — Lab 01</title>
+    <title>Tank Arena — Lab 02</title>
   </head>
   <body>
     <main id="game">
@@ -13,12 +13,22 @@
         <div>STEPS/S: <span id="steps">0</span></div>
         <div>FRAME: <span id="frame">0</span> ms</div>
       </div>
+      <div id="scoreboard">
+        <div>РАХУНОК: <b id="score">0</b></div>
+        <div>HP: <span id="hp">—</span></div>
+        <div>ЕФЕКТИ: <span id="effects">—</span></div>
+      </div>
       <div id="help">
         <b>Tank Arena</b><br />
         W/S — рух<br />
         A/D — поворот корпусу<br />
         Q/E — поворот башти<br />
-        Space — постріл
+        Space — постріл<br />
+        <span class="legend">
+          <i style="color: #3fd0ff">S</i> щит ·
+          <i style="color: #ffd23f">R</i> rapid fire ·
+          <i style="color: #ff5fd2">H</i> homing-постріли
+        </span>
       </div>
     </main>
     <script type="module" src="/src/main.js"></script>

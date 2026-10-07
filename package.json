@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "exp:this": "node experiments/this-bug.js",
+    "exp:proto": "node experiments/prototype-chain.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
