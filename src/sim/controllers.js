@@ -22,9 +22,9 @@ export function playerController(ship, world) {
     (input.isDown(positive) ? 1 : 0) - (input.isDown(negative) ? 1 : 0);
 
   return {
-    throttle: axis('KeyW', 'KeyS'),
-    turn: axis('KeyD', 'KeyA'),
-    turretTurn: axis('KeyE', 'KeyQ'),
+    throttle: axis('ArrowUp', 'ArrowDown'),
+    turn: axis('ArrowRight', 'ArrowLeft'),
+    turretTurn: axis('KeyX', 'KeyZ'),
     fire: false,
   };
 }
