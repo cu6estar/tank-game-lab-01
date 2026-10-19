@@ -16,6 +16,7 @@ export function createLobbyUi(root, lobby) {
   const status = root.querySelector('#lobby-status');
   const retryButton = root.querySelector('#lobby-retry');
   const joinButton = root.querySelector('#join');
+  const notice = root.querySelector('#lobby-notice');
 
   let selectedId = null;
   let listeners = null; // AbortController слухачів, поки лобі видиме
@@ -104,9 +105,15 @@ export function createLobbyUi(root, lobby) {
     joinButton.disabled = selectedId === null;
   }
 
+  function setNotice(text) {
+    notice.textContent = text ?? '';
+    notice.hidden = !text;
+  }
+
   function onSubmit(event) {
     event.preventDefault();
     if (selectedId === null) return;
+    setNotice(null);
 
     lobby.playerName = nameInput.value;
     saveName(nameInput.value.trim());
@@ -120,8 +127,9 @@ export function createLobbyUi(root, lobby) {
 
   return {
     /** Показати лобі й почати оновлення. */
-    show() {
+    show({ notice: text } = {}) {
       root.hidden = false;
+      setNotice(text);
       listeners?.abort();
       listeners = new AbortController();
       const { signal } = listeners;

@@ -4,7 +4,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**'],
+    ignores: ['**/dist/**', '**/logs/**'],
   },
   js.configs.recommended,
   prettier,
@@ -17,15 +17,25 @@ export default [
   },
   {
     // Node-скрипти: тести, експерименти, конфіг Vite
-    files: ['tests/**/*.js', 'experiments/**/*.{js,mjs}', 'vite.config.js'],
+    files: [
+      'client/tests/**/*.js',
+      'client/experiments/**/*.{js,mjs}',
+      'client/vite.config.js',
+    ],
     languageOptions: {
       globals: { ...globals.node, ...globals.browser },
     },
   },
   {
+    // Сервер: чистий Node, без DOM. Браузерних глобалів тут бути не повинно —
+    // якщо в server/ випадково з'явиться `document` чи `window`, ESLint це покаже.
+    files: ['server/**/*.js'],
+    languageOptions: { globals: globals.node },
+  },
+  {
     // Шина подій розв'язує симуляцію зі звуком і HUD: sim може імпортувати
     // лише сусідні файли ('./x.js'), ніколи audio.js / hud.js / render.js.
-    files: ['src/sim/**/*.js'],
+    files: ['client/src/sim/**/*.js'],
     rules: {
       'no-restricted-imports': [
         'error',

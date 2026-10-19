@@ -1,0 +1,20 @@
+{
+  "name": "tank-arena-client",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test",
+    "exp:this": "node experiments/this-bug.js",
+    "exp:proto": "node experiments/prototype-chain.js",
+    "exp:timing": "node experiments/sequential-vs-concurrent.js",
+    "exp:puzzles": "node experiments/puzzles.js",
+    "exp:failures": "node experiments/failure-gallery.js"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

@@ -3,12 +3,14 @@ import { createAudio } from './audio.js';
 import { loadAll, loadJson, validateManifest } from './assets/loader.js';
 import { createChaosFetch } from './dev/chaos.js';
 import { describeError } from './describe-error.js';
+import { createChatUi } from './chat-ui.js';
 import { createHud } from './hud.js';
-import { createInput } from './input.js';
+import { createInput, isTyping } from './input.js';
 import { Lobby } from './lobby.js';
 import { createLobbyUi } from './lobby-ui.js';
 import { createLoadingScreen } from './loading-screen.js';
 import { createLoop } from './loop.js';
+import { joinRoomSession } from './net/room-session.js';
 import { createRenderer } from './render.js';
 import { Game } from './sim/game.js';
 
@@ -20,6 +22,7 @@ const renderer = createRenderer(canvas);
 const input = createInput(window);
 const hud = createHud(document);
 const audio = createAudio();
+const chat = createChatUi(document);
 
 // AudioContext створений у стані "suspended"; перший клік/клавіша розблокує його.
 audio.unlockOnGesture(window);
@@ -40,7 +43,7 @@ const setPhase = (phase) => {
   document.body.dataset.phase = phase;
 };
 
-/** Поточна гра: { game, room, name, controller } або null (loading / лобі). */
+/** Поточна гра: { game, room, name, controller, net } або null (loading / лобі). */
 let session = null;
 
 const loop = createLoop({
@@ -82,6 +85,14 @@ function describeSound() {
  * Альтернативи (.bind, поле-стрілка) описані в README.
  */
 window.addEventListener('keydown', (event) => {
+  // У полі вводу (чат, ім'я) клавіші належать полю, а не грі. Виняток — Esc:
+  // він повертає фокус із чату в гру.
+  if (isTyping(event)) {
+    if (event.code === 'Escape' && event.target === chat.input)
+      chat.input.blur();
+    return;
+  }
+
   if (event.code === 'KeyM') {
     audio.toggleMute();
     return;
@@ -89,7 +100,11 @@ window.addEventListener('keydown', (event) => {
 
   if (!session) return; // у лобі Space/Esc належать формі, а не грі
 
-  if (event.code === 'Space') {
+  if (event.code === 'Enter') {
+    event.preventDefault();
+    input.clear(); // клавіші, затиснуті до переходу в чат, не повинні "залипнути"
+    chat.focus();
+  } else if (event.code === 'Space') {
     event.preventDefault();
     session.game.player?.fire();
   } else if (event.code === 'Escape') {
@@ -180,18 +195,34 @@ function startGame({ room, name, arena }) {
   hud.bindGame(game, { signal: controller.signal });
   hud.setPilot(`${name} · ${room.name}`);
 
+  // Мережа: гра поки локальна (координати по мережі — лаба 5), але кімната,
+  // склад гравців і чат — вже справжні, через WebSocket-сервер.
+  chat.reset();
+  const net = joinRoomSession({
+    roomId: room.id,
+    name,
+    ui: chat,
+    onRejected: ({ reason }) => {
+      // сервер не пустив (заповнена/не існує) або з'єднання безнадійне: назад у лобі
+      leaveGame({ notice: `Не вдалося увійти в «${room.name}»: ${reason}` });
+    },
+  });
+  chat.onSubmit((text) => net.sendChat(text), { signal: controller.signal });
+
   game.start();
-  session = { game, room, name, controller };
+  session = { game, room, name, controller, net };
   setPhase('game');
 }
 
-function leaveGame() {
+function leaveGame({ notice } = {}) {
   session?.controller.abort();
+  session?.net.leave(); // 'leave' серверу, закрити сокет, зупинити reconnect
   session = null;
 
+  document.activeElement?.blur();
   hud.setPilot('—');
   setPhase('lobby');
-  lobbyUi.show();
+  lobbyUi.show({ notice });
 }
 
 // -------------------------------------------------------------------- старт

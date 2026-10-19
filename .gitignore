@@ -3,3 +3,6 @@ dist
 .vscode/*
 !.vscode/extensions.json
 .DS_Store
+logs
+.env
+logs-experiment

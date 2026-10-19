@@ -1,0 +1,22 @@
+{
+  "name": "tank-arena-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=../.env src/index.js",
+    "start": "node --env-file-if-exists=../.env src/index.js",
+    "test": "node --test",
+    "exp:order": "node experiments/event-loop-order.js",
+    "exp:block": "node experiments/event-loop-block.js",
+    "exp:crash": "node experiments/crash-demo.js",
+    "exp:rss": "node experiments/rss-backpressure.js --mb=200 --rate=10",
+    "tool:big-log": "node tools/make-big-log.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

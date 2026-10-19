@@ -249,6 +249,106 @@ input:focus-visible {
 /* игрові панелі видно лише під час гри, не на екрані завантаження та в лобі */
 body:not([data-phase='game']) #hud,
 body:not([data-phase='game']) #scoreboard,
-body:not([data-phase='game']) #help {
+body:not([data-phase='game']) #help,
+body:not([data-phase='game']) #chat {
   display: none;
+}
+
+/* ---- чат кімнати (лаба 4) ---- */
+#chat {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  width: min(340px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  color: #e9f5e5;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+}
+
+.net-status {
+  font-size: 12px;
+  color: rgba(233, 245, 229, 0.65);
+}
+
+.net-status[data-state='open']::before {
+  content: '● ';
+  color: #6fe07a;
+}
+
+.net-status[data-state='reconnecting']::before,
+.net-status[data-state='connecting']::before {
+  content: '◌ ';
+  color: #ffd23f;
+}
+
+.net-status[data-state='closed']::before {
+  content: '✕ ';
+  color: #ff8a7a;
+}
+
+.roster {
+  color: #bfe6b8;
+  overflow-wrap: anywhere;
+}
+
+#chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 170px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#chat-log li {
+  overflow-wrap: anywhere;
+}
+
+#chat-log .who {
+  color: #ffe56a;
+  font-weight: bold;
+}
+
+#chat-log .system {
+  color: rgba(233, 245, 229, 0.55);
+  font-style: italic;
+}
+
+#chat-log .mine .who {
+  color: #6fe07a;
+}
+
+#chat-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  color: inherit;
+  font: inherit;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+}
+
+#chat-input:focus {
+  outline: 2px solid #ffd23f;
+}
+
+.lobby-notice {
+  margin: 0 auto 12px;
+  max-width: 520px;
+  padding: 8px 12px;
+  color: #ffb4a8;
+  background: rgba(255, 90, 70, 0.12);
+  border: 1px solid rgba(255, 90, 70, 0.4);
+  border-radius: 8px;
+  font-size: 14px;
 }

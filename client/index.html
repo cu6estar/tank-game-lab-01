@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tank Arena — Lab 03</title>
+    <title>Tank Arena — Lab 04</title>
   </head>
   <body data-phase="loading">
     <main id="game">
@@ -28,7 +28,7 @@
         ↑/↓ — рух<br />
         ←/→ — поворот корпусу<br />
         Z/X — поворот башти<br />
-        Space — постріл<br />
+        Space — постріл · Enter — чат<br />
         M — звук · Esc — до лобі<br />
         <span class="legend">
           <i style="color: #3fd0ff">S</i> щит ·
@@ -36,6 +36,20 @@
           <i style="color: #ff5fd2">H</i> homing-постріли
         </span>
       </div>
+
+      <aside id="chat" aria-label="Чат кімнати">
+        <div id="net-status" class="net-status">—</div>
+        <div id="roster" class="roster"></div>
+        <ol id="chat-log" aria-live="polite"></ol>
+        <form id="chat-form" autocomplete="off">
+          <input
+            id="chat-input"
+            maxlength="200"
+            placeholder="Enter — написати в чат"
+            aria-label="Повідомлення"
+          />
+        </form>
+      </aside>
 
       <!-- кнопки екрана завантаження (сам екран малюється на канвасі) -->
       <div id="loading-actions" hidden>
@@ -46,6 +60,8 @@
       <section id="lobby" class="overlay" hidden aria-labelledby="lobby-title">
         <h1 id="lobby-title">TANK ARENA</h1>
         <p class="subtitle">Лобі</p>
+
+        <p id="lobby-notice" class="lobby-notice" role="alert" hidden></p>
 
         <form id="lobby-form" autocomplete="off">
           <label class="field">
