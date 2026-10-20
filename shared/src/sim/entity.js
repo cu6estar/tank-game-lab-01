@@ -8,9 +8,10 @@ import { Vector2 } from './vector.js';
  * "причіплюються" як компоненти: attach / detach / has / getComponent.
  */
 export class Entity {
-  // Приватний лічильник: ззовні id видати неможливо, тільки через конструктор.
-  static #nextId = 1;
-  #id = Entity.#nextId++;
+  // id видає СВІТ при spawn (World.#nextId), а не глобальний лічильник:
+  // два світи (дві кімнати на сервері, сервер і клієнт) нумерують сутності
+  // незалежно й однаково, якщо роблять однакові дії.
+  #id = 0;
   #components = new Map();
 
   constructor({
@@ -35,6 +36,11 @@ export class Entity {
 
   get id() {
     return this.#id;
+  }
+
+  /** Лише для World.spawn: id приватний, тож змінити його ззовні не можна. */
+  static assignId(entity, id) {
+    entity.#id = id;
   }
 
   /**

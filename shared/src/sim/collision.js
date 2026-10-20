@@ -36,7 +36,9 @@ export function findCollisions(entities) {
  */
 function destroy(world, entity, killerTeam = null) {
   entity.kill();
-  world.spawn(new Explosion({ pos: entity.pos, size: entity.radius }));
+  world.spawn(
+    new Explosion({ pos: entity.pos, size: entity.radius, rand: world.rand }),
+  );
   world.emit('exploded', {
     entity,
     kind: entity.kind,

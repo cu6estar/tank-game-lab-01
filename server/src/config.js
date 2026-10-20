@@ -63,7 +63,7 @@ const schema = {
   staticDir: text('STATIC_DIR', '../client/dist'),
   maxRooms: integer('MAX_ROOMS', 20, { min: 1, max: 1000 }),
   maxPlayersPerRoom: integer('MAX_PLAYERS_PER_ROOM', 8, { min: 1, max: 64 }),
-  rateLimitPerSec: integer('RATE_LIMIT_PER_SEC', 20, { min: 1, max: 1000 }),
+  rateLimitPerSec: integer('RATE_LIMIT_PER_SEC', 90, { min: 1, max: 1000 }),
   maxPayloadBytes: integer('MAX_PAYLOAD_BYTES', 2048, {
     min: 64,
     max: 1_048_576,

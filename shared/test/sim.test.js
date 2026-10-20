@@ -15,17 +15,6 @@ import { World } from '../src/sim/world.js';
 
 const DT = 1 / 60;
 
-function seeded(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 const run = (seconds, step) => {
   for (let i = 0; i < Math.round(seconds / DT); i++) step(i);
 };
@@ -79,10 +68,18 @@ describe('Vector2', () => {
 // ----------------------------------------------------------- Entity / класи
 
 describe('Entity та ієрархія', () => {
-  it('id унікальні та приватні, глибина успадкування = 1', () => {
-    const a = new Ship({ pos: new Vector2(), team: 'player' });
-    const b = new Ship({ pos: new Vector2(), team: 'player' });
-    assert.ok(b.id > a.id);
+  it('id видає світ: послідовні, незалежні між світами, приватні; глибина успадкування = 1', () => {
+    const w1 = new World();
+    const w2 = new World();
+    const a = w1.spawn(new Ship({ pos: new Vector2(), team: 'player' }));
+    const b = w1.spawn(new Ship({ pos: new Vector2(), team: 'player' }));
+    const c = w2.spawn(new Ship({ pos: new Vector2(), team: 'player' }));
+    assert.deepEqual([a.id, b.id, c.id], [1, 2, 1], 'кожен світ нумерує сам');
+    assert.equal(
+      new Ship({ pos: new Vector2(), team: 'p' }).id,
+      0,
+      'до spawn id немає',
+    );
     assert.equal(Object.keys(a).includes('id'), false);
     assert.throws(() => {
       a.id = 5;
@@ -376,20 +373,22 @@ describe('homing', () => {
 
 describe('Game', () => {
   it('є EventTarget; scoreChanged приходить з новим рахунком', () => {
-    const game = new Game({ width: 2000, height: 1500, rand: seeded(7) });
+    const game = new Game({ width: 2000, height: 1500, seed: 7 });
     assert.ok(game instanceof EventTarget);
     game.start();
+    game.addPlayer(0, { name: 'Ivan' });
 
     for (const entity of game.world) {
-      if (entity !== game.player) game.world.despawn(entity.id);
+      if (entity !== game.shipOf(0)) game.world.despawn(entity.id);
     }
-    game.step(DT, null);
+    game.step(DT);
 
     const scores = [];
     game.addEventListener('scoreChanged', (event) => scores.push(event.detail));
 
-    const player = game.player;
+    const player = game.shipOf(0);
     player.fireCooldown = 0;
+    player.detach('shield');
     player.pos = new Vector2(300, 300);
     player.turretAngle = 0;
     const enemy = game.world.spawn(
@@ -398,47 +397,50 @@ describe('Game', () => {
 
     for (let i = 0; i < 300 && enemy.alive; i++) {
       player.fire();
-      game.step(DT, null);
+      game.step(DT);
     }
 
     assert.equal(enemy.alive, false);
-    assert.equal(game.score, 100);
-    assert.deepEqual(scores, [{ score: 100, delta: 100 }]);
+    assert.equal(game.players.get(0).score, 100);
+    assert.deepEqual(scores, [{ slot: 0, score: 100, delta: 100 }]);
   });
 
   it('респаун через 2 с: новий корабель із щитом і повним HP', () => {
-    const game = new Game({ width: 1600, height: 1200, rand: seeded(1) });
+    const game = new Game({ width: 1600, height: 1200, seed: 1 });
     game.start();
-    const player = game.player;
+    game.addPlayer(0);
+    const player = game.shipOf(0);
+    player.detach('shield'); // щит спавну погасив би удар
 
     game.world.spawn(asteroidAt(player.pos.x + 5, player.pos.y, 30));
     player.takeDamage(75);
 
-    for (let i = 0; i < 10 && game.player === player; i++) game.step(DT, null);
-    assert.equal(game.player, null);
-    assert.ok(game.respawnIn > 1.9 && game.respawnIn <= 2);
+    for (let i = 0; i < 10 && game.shipOf(0) === player; i++) game.step(DT);
+    assert.equal(game.shipOf(0), null);
+    assert.ok(game.respawnIn(0) > 1.9 && game.respawnIn(0) <= 2);
 
     let steps = 0;
-    while (!game.player && steps < 200) {
-      game.step(DT, null);
+    while (!game.shipOf(0) && steps < 200) {
+      game.step(DT);
       steps += 1;
     }
 
-    assert.ok(game.player && game.player !== player);
+    assert.ok(game.shipOf(0) && game.shipOf(0) !== player);
     assert.ok(steps >= 116 && steps <= 121, `респаун за ${steps} кроків`);
-    assert.equal(game.player.hp, 100);
-    assert.equal(game.player.has('shield'), true);
-    assert.equal(game.respawnIn, null);
+    assert.equal(game.shipOf(0).hp, 100);
+    assert.equal(game.shipOf(0).has('shield'), true);
+    assert.equal(game.respawnIn(0), null);
   });
 
   it('конфіг арени з лобі застосовується й обмежується', () => {
     const game = new Game({
       width: 1600,
       height: 1200,
-      rand: seeded(3),
+      seed: 3,
       arena: { enemies: 4, asteroids: 3, maxPickups: 0 },
     });
     game.start();
+    game.addPlayer(0);
 
     assert.equal([...game.world.ofKind('ship')].length, 1 + 4);
     assert.equal([...game.world.ofKind('asteroid')].length, 3);
@@ -459,15 +461,15 @@ describe('Game', () => {
   });
 
   it('довгий прогін стабільний: без NaN, кількість сутностей обмежена', () => {
-    const game = new Game({ width: 1280, height: 720, rand: seeded(42) });
+    const game = new Game({ width: 1280, height: 720, seed: 42 });
     game.start();
-    const keys = new Set(['ArrowUp', 'KeyX']);
-    const input = { isDown: (code) => keys.has(code) };
+    game.addPlayer(0);
+    game.setInput(0, 1, { throttle: 1, turretTurn: 1, fire: false });
     let max = 0;
 
     run(120, (i) => {
-      if (i % 20 === 0) game.player?.fire();
-      game.step(DT, input);
+      if (i % 20 === 0) game.shipOf(0)?.fire();
+      game.step(DT);
       max = Math.max(max, game.world.size);
       for (const e of game.world) {
         assert.ok(Number.isFinite(e.pos.x) && Number.isFinite(e.pos.y), e.kind);
@@ -495,8 +497,9 @@ describe('sim ізольований від audio/HUD', () => {
 
       for (const specifier of specifiers) {
         assert.ok(
-          /^\.\/[\w-]+\.js$/.test(specifier),
-          `${file} імпортує "${specifier}" — sim може залежати лише від своїх файлів`,
+          /^\.\/[\w-]+\.js$/.test(specifier) ||
+            /^\.\.\/(rng|constants|math)\.js$/.test(specifier),
+          `${file} імпортує "${specifier}" — sim може залежати лише від своїх файлів, rng.js, math.js і constants.js`,
         );
         assert.ok(
           !/audio|hud|lobby|render/i.test(specifier),
@@ -510,8 +513,10 @@ describe('sim ізольований від audio/HUD', () => {
     for (const file of files) {
       const source = readFileSync(simDir + file, 'utf8');
       assert.ok(
-        !/\b(document|window|AudioContext|AudioBuffer)\b/.test(source),
-        `${file} звертається до браузерного API`,
+        !/\b(document|window|AudioContext|AudioBuffer|process|Date\.now|Math\.random)\b/.test(
+          source.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, ''),
+        ),
+        `${file} звертається до браузерного/Node API або до недетермінованого джерела`,
       );
     }
   });

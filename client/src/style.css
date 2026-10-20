@@ -352,3 +352,73 @@ body:not([data-phase='game']) #chat {
   border-radius: 8px;
   font-size: 14px;
 }
+
+/* ---- netgraph (Лаб 5) ---- */
+body:not([data-phase='game']) #netgraph {
+  display: none;
+}
+
+.netgraph {
+  position: fixed;
+  left: 16px;
+  top: 132px;
+  width: 300px;
+  padding: 8px 10px;
+  background: rgba(8, 12, 8, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  font:
+    11px/1.35 Consolas,
+    monospace;
+  color: #cfe8cb;
+  z-index: 5;
+}
+
+.netgraph[hidden] {
+  display: none;
+}
+
+.netgraph .ng-title {
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.netgraph .ng-title small {
+  font-weight: normal;
+  opacity: 0.6;
+}
+
+.netgraph .ng-text {
+  margin: 0 0 4px;
+  white-space: pre;
+  font: inherit;
+}
+
+.netgraph .ng-canvas {
+  width: 260px;
+  height: 56px;
+  display: block;
+}
+
+.netgraph .ng-legend {
+  font-size: 10px;
+  opacity: 0.8;
+  margin: 2px 0 6px;
+}
+
+.netgraph label {
+  display: block;
+  margin-top: 4px;
+}
+
+.netgraph select,
+.netgraph input[type='range'] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.netgraph .ng-controls summary {
+  cursor: pointer;
+  margin-top: 6px;
+  color: #ffd23f;
+}

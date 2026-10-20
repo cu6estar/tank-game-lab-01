@@ -1,4 +1,7 @@
-const STEP = 1 / 60;
+import { DT } from '@tank/shared/constants.js';
+
+// Крок клієнта = крок сервера (30 Гц): один ввід на один крок симуляції.
+const STEP = DT;
 const MAX_FRAME_TIME = 0.25;
 
 export function createLoop({ step, render }) {

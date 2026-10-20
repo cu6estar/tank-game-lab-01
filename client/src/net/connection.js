@@ -17,6 +17,9 @@
  * 'statechange' { state }, 'protocolerror' { raw }.
  */
 
+/** JSON-повідомлення "гри" (а не чату/кімнат): саме їх затримує інжектор лагу. */
+export const GAME_TYPES = new Set(['snapshot', 'pong', 'input', 'ping']);
+
 const OPEN = 1; // WebSocket.OPEN: не залежимо від глобальної змінної (тестам підставляється фейк)
 
 /** Коди, після яких повторювати марно: сервер сказав "ні" свідомо. */
@@ -51,6 +54,8 @@ export class Connection extends EventTarget {
   #maxQueue;
   #shouldReconnect;
   #timers;
+  #lag;
+  #onBinary;
   #socket = null;
   #generation = 0; // номер сокета: запізнілі події старого сокета ігноруємо
   #handlers = new Map();
@@ -67,6 +72,8 @@ export class Connection extends EventTarget {
     backoff = {},
     maxQueue = 50,
     fatalCodes = DEFAULT_FATAL_CODES,
+    lag = null,
+    onBinary = null,
     timers = {
       setTimeout: (...a) => globalThis.setTimeout(...a),
       clearTimeout: (t) => globalThis.clearTimeout(t),
@@ -80,6 +87,8 @@ export class Connection extends EventTarget {
     this.#maxQueue = maxQueue;
     this.#shouldReconnect = (code) => !fatalCodes.has(code);
     this.#timers = timers;
+    this.#lag = lag;
+    this.#onBinary = onBinary;
   }
 
   /** 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' */
@@ -135,6 +144,7 @@ export class Connection extends EventTarget {
       return;
     }
     this.#socket = socket;
+    socket.binaryType = 'arraybuffer'; // бінарні кадри як ArrayBuffer, не Blob
 
     // addEventListener, а не socket.onopen = this.#onOpen: так не втрачається this
     socket.addEventListener(
@@ -168,6 +178,12 @@ export class Connection extends EventTarget {
   }
 
   #onMessage(raw) {
+    if (typeof raw !== 'string') {
+      // бінарний кадр = гра (знімок, pong): шлях приймання теж проходить через інжектор
+      const frame = new Uint8Array(raw);
+      return this.#viaLag(() => this.#onBinary?.(frame));
+    }
+
     let message;
     try {
       message = JSON.parse(raw);
@@ -188,14 +204,23 @@ export class Connection extends EventTarget {
       return;
     }
 
-    for (const handler of [...(this.#handlers.get(message.type) ?? [])]) {
-      try {
-        handler(message);
-      } catch (error) {
-        // збій одного споживача не повинен глушити решту
-        console.error(`[connection] handler "${message.type}":`, error);
+    const dispatch = () => {
+      for (const handler of [...(this.#handlers.get(message.type) ?? [])]) {
+        try {
+          handler(message, raw.length);
+        } catch (error) {
+          // збій одного споживача не повинен глушити решту
+          console.error(`[connection] handler "${message.type}":`, error);
+        }
       }
-    }
+    };
+    if (GAME_TYPES.has(message.type)) this.#viaLag(dispatch);
+    else dispatch();
+  }
+
+  #viaLag(fn) {
+    if (this.#lag) this.#lag.pass(fn);
+    else fn();
   }
 
   #onClose({ code, reason }) {
@@ -239,6 +264,24 @@ export class Connection extends EventTarget {
     if (this.#queue.length >= this.#maxQueue) return 'dropped';
     this.#queue.push(message);
     return 'queued';
+  }
+
+  /**
+   * Ігровий трафік (ввід, ping): не буферизується й не повторюється — застарілий
+   * ввід нікому не потрібен. Проходить через інжектор лагу. `frame` — рядок
+   * (JSON-кодек) або Uint8Array (бінарний).
+   * @returns {boolean} false, якщо сокет не відкритий
+   */
+  sendGame(frame) {
+    if (this.#state !== 'open' || this.#socket?.readyState !== OPEN)
+      return false;
+    const socket = this.#socket;
+    this.#viaLag(() => {
+      // за час затримки сокет міг закритись/замінитись
+      if (socket === this.#socket && socket.readyState === OPEN)
+        socket.send(frame);
+    });
+    return true;
   }
 
   /** Закрити остаточно: без перепідключення, чергу скинуто. */

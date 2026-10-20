@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
+import { CodecError, getCodec, peekType } from '@tank/shared/codec/index.js';
+import { TICK_RATE } from '@tank/shared/constants.js';
+import { MSG } from '@tank/shared/protocol/constants.js';
 import { CLOSE, parseMessage, server as msg } from './protocol.js';
 import { slowClientAction } from './policy.js';
 import { TokenBucket } from './ratelimit.js';
@@ -85,7 +88,12 @@ export function attachWebSocketServer({
      *   > killClientBytes  — клієнта не наздогнати, закриваємо сокет.
      * Без цього кожне наступне send() лише збільшувало б чергу в пам'яті сервера.
      */
-    function send(message, { critical = true } = {}) {
+    function send(message, options) {
+      return sendFrame(JSON.stringify(message), options);
+    }
+
+    /** Те саме для вже закодованого кадру: рядок → текстовий, Uint8Array → бінарний. */
+    function sendFrame(frame, { critical = true } = {}) {
       if (socket.readyState !== WebSocket.OPEN) return false;
 
       const buffered = socket.bufferedAmount;
@@ -108,7 +116,7 @@ export function attachWebSocketServer({
         return false;
       }
 
-      socket.send(JSON.stringify(message), (error) => {
+      socket.send(frame, (error) => {
         if (error)
           logger.warn(`[ws ${state.id}] send failed: ${error.message}`);
       });
@@ -131,7 +139,7 @@ export function attachWebSocketServer({
       state.player = null;
     }
 
-    function onJoin({ room: roomId, name }) {
+    function onJoin({ room: roomId, name, codec }) {
       if (state.room) return fail(CLOSE.BAD_MESSAGE, 'повторний join');
 
       const room = rooms.get(roomId);
@@ -143,10 +151,16 @@ export function attachWebSocketServer({
       }
 
       clearTimeout(joinTimer);
-      const player = { id: state.id, name, send };
-      // welcome — до першого roster, який room.join розішле всім
+      const player = { id: state.id, name, send, sendFrame, codec };
+      state.codec = getCodec(codec);
+      // welcome — до першого roster, який room.join розішле всім.
+      // Слот гравця приходить у roster (його призначає кімната при join).
       send(
-        msg.welcome({ id: player.id, name }, { id: room.id, name: room.name }),
+        msg.welcome(
+          { id: player.id, name },
+          { id: room.id, name: room.name },
+          { seed: room.seed, tickRate: TICK_RATE, codec },
+        ),
       );
 
       try {
@@ -161,6 +175,33 @@ export function attachWebSocketServer({
       logger.info(`[ws ${state.id}] ${name} → ${room.id}`);
     }
 
+    function onBinary(data) {
+      try {
+        switch (peekType(data)) {
+          case MSG.INPUT:
+            return onInput(state.codec.decodeInputs(data));
+          case MSG.PING:
+            return onPing(state.codec.decodePing(data), state.codec);
+          default:
+            return fail(CLOSE.UNKNOWN_TYPE, 'невідомий тип бінарного кадру');
+        }
+      } catch (error) {
+        if (error instanceof CodecError)
+          return fail(CLOSE.BAD_MESSAGE, `бінарний кадр: ${error.message}`);
+        throw error;
+      }
+    }
+
+    function onInput(inputs) {
+      state.room.match?.receiveInputs(state.player, inputs);
+    }
+
+    function onPing(t, codec) {
+      const tick = state.room.match?.tick ?? 0;
+      // pong відповідає тим самим кодеком, у якому клієнт надіслав ping
+      sendFrame(codec.encodePong(t, tick), { critical: false });
+    }
+
     socket.on('message', (data, isBinary) => {
       // ліміт перевіряємо ДО розбору: сміттєві кадри не повинні коштувати CPU
       if (!state.bucket.take()) {
@@ -170,8 +211,12 @@ export function attachWebSocketServer({
           `більше ${config.rateLimitPerSec} повідомлень/с`,
         );
       }
-      if (isBinary)
-        return fail(CLOSE.UNSUPPORTED_DATA, 'очікується текстовий кадр');
+      if (isBinary) {
+        // Бінарні кадри (ввід, ping) дозволені лише після join
+        if (!state.room)
+          return fail(CLOSE.UNSUPPORTED_DATA, 'бінарний кадр до join');
+        return onBinary(data);
+      }
 
       const parsed = parseMessage(data.toString('utf8'));
       if (!parsed.ok) return fail(parsed.code, parsed.reason);
@@ -188,6 +233,10 @@ export function attachWebSocketServer({
           return fail(CLOSE.BAD_MESSAGE, 'повторний join');
         case 'chat':
           return void state.room.chat(state.player.id, message.text);
+        case 'input':
+          return onInput(message.inputs);
+        case 'ping':
+          return onPing(message.t, getCodec('json'));
         case 'leave':
           leaveRoom();
           return socket.close(CLOSE.NORMAL, 'bye');

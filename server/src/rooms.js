@@ -2,6 +2,8 @@ import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { server as msg } from './protocol.js';
 
+const newSeed = () => randomBytes(4).readUInt32LE() || 1;
+
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
@@ -47,6 +49,8 @@ export class Room extends EventEmitter {
     this.arena = arena;
     this.permanent = permanent; // кімнати "за замовчуванням" не видаляються, коли порожні
     this.now = now;
+    this.seed = newSeed(); // насіння ГПВЧ матчу; нове після кожного спорожніння
+    this.match = null; // виставляє менеджер матчів
   }
 
   get size() {
@@ -66,6 +70,7 @@ export class Room extends EventEmitter {
     }
 
     const wasEmpty = this.players.size === 0;
+    player.slot = this.#freeSlot();
     this.players.set(player.id, player);
 
     // 'open' раніше за 'event': слухач логу підписується в 'open' і встигає
@@ -85,7 +90,10 @@ export class Room extends EventEmitter {
     this.emit('leave', player);
     this.broadcast(msg.roster(this.roster()));
 
-    if (this.players.size === 0) this.emit('empty');
+    if (this.players.size === 0) {
+      this.seed = newSeed();
+      this.emit('empty');
+    }
     return true;
   }
 
@@ -107,7 +115,11 @@ export class Room extends EventEmitter {
   }
 
   roster() {
-    return [...this.players.values()].map(({ id, name }) => ({ id, name }));
+    return [...this.players.values()].map(({ id, name, slot }) => ({
+      id,
+      name,
+      slot,
+    }));
   }
 
   broadcast(message, options) {
@@ -128,6 +140,18 @@ export class Room extends EventEmitter {
       maxPlayers: this.maxPlayers,
       arena: this.arena,
     };
+  }
+
+  #freeSlot() {
+    const used = new Set([...this.players.values()].map((p) => p.slot));
+    let slot = 0;
+    while (used.has(slot)) slot += 1;
+    return slot;
+  }
+
+  /** Запис у лог матчу (подія 'event'). */
+  record(type, data) {
+    this.#record(type, data);
   }
 
   #record(type, data) {

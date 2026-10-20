@@ -1,3 +1,5 @@
+import { Entity } from './entity.js';
+import { createRng } from '../rng.js';
 import { Vector2 } from './vector.js';
 import { resolveCollisions } from './collision.js';
 
@@ -26,11 +28,13 @@ function wrapCoordinate(value, size) {
  */
 export class World extends EventTarget {
   #entities = new Map();
+  #lastId = 0;
 
   constructor({
     width = 800,
     height = 600,
     collisionSystem = resolveCollisions,
+    rand = createRng(1),
   } = {}) {
     super();
     this.width = width;
@@ -39,6 +43,9 @@ export class World extends EventTarget {
     this.collisionSystem = collisionSystem;
     this.inputs = null; // вводи поточного кроку, їх читають контролери
     this.time = 0;
+    // Єдине джерело випадковості симуляції: засіяний генератор (див. rng.js).
+    // Math.random() у sim заборонено — інакше клієнт і сервер розійдуться.
+    this.rand = rand;
   }
 
   get size() {
@@ -50,7 +57,19 @@ export class World extends EventTarget {
     this.height = height;
   }
 
+  /**
+   * id — послідовні числа 1, 2, 3… і вміщаються в u16 (бінарний протокол).
+   * Після 65535 лічильник обертається, пропускаючи ще живі id.
+   */
+  #allocateId() {
+    do {
+      this.#lastId = (this.#lastId % 0xffff) + 1;
+    } while (this.#entities.has(this.#lastId));
+    return this.#lastId;
+  }
+
   spawn(entity) {
+    if (entity.id === 0) Entity.assignId(entity, this.#allocateId());
     entity.world = this;
     this.#entities.set(entity.id, entity);
     return entity;

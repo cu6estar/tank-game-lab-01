@@ -10,9 +10,9 @@ import { Lobby } from './lobby.js';
 import { createLobbyUi } from './lobby-ui.js';
 import { createLoadingScreen } from './loading-screen.js';
 import { createLoop } from './loop.js';
-import { joinRoomSession } from './net/room-session.js';
+import { createNetGame } from './net/net-game.js';
+import { createNetgraph } from './netgraph.js';
 import { createRenderer } from './render.js';
-import { Game } from './sim/game.js';
 
 const MANIFEST_URL = '/assets/manifest.json';
 
@@ -23,6 +23,24 @@ const input = createInput(window);
 const hud = createHud(document);
 const audio = createAudio();
 const chat = createChatUi(document);
+const netgraph = createNetgraph(document.querySelector('#netgraph'));
+
+// Експеримент з детермінізмом (див. dev/determinism-break.js)
+if (new URLSearchParams(location.search).get('break') === 'random') {
+  import('./dev/determinism-break.js').then((m) => m.installRandomBreak());
+}
+
+/** Клавіші → намір гравця (те, що йде на сервер): газ, поворот, башта, вогонь. */
+function readIntent() {
+  const axis = (positive, negative) =>
+    (input.isDown(positive) ? 1 : 0) - (input.isDown(negative) ? 1 : 0);
+  return {
+    throttle: axis('ArrowUp', 'ArrowDown'),
+    turn: axis('ArrowRight', 'ArrowLeft'),
+    turretTurn: axis('KeyX', 'KeyZ'),
+    fire: input.isDown('Space'),
+  };
+}
 
 // AudioContext створений у стані "suspended"; перший клік/клавіша розблокує його.
 audio.unlockOnGesture(window);
@@ -43,22 +61,25 @@ const setPhase = (phase) => {
   document.body.dataset.phase = phase;
 };
 
-/** Поточна гра: { game, room, name, controller, net } або null (loading / лобі). */
+/** Поточна гра: { room, name, controller, net } або null (loading / лобі). */
 let session = null;
 
 const loop = createLoop({
-  step(dt) {
+  // 30 Гц, як у сервера: один крок = один ввід із номером seq
+  step() {
     if (!session) return;
-
-    session.game.resize(renderer.width, renderer.height);
-    session.game.step(dt, input);
+    session.net.step(readIntent());
     hud.recordStep();
   },
 
   render(alpha, frameTime) {
-    renderer.draw(session?.game.world ?? null, alpha);
+    const scene = session?.net.frame(alpha, frameTime / 1000) ?? null;
+    renderer.draw(scene);
 
-    if (session) hud.update(session.game);
+    if (scene) {
+      hud.update(scene.me);
+      hud.setScore(scene.me.score);
+    }
     hud.setSound(describeSound());
     hud.recordFrame(frameTime);
   },
@@ -72,17 +93,8 @@ function describeSound() {
 }
 
 /*
- * Постріл через слухач клавіатури.
- *
- * НАЇВНО (баг): window.addEventListener('keydown', ship.fire);
- *   Браузер викликає слухача з this = window, а не кораблем, тому
- *   всередині fire() `this.cooldown`, `this.getComponent`… читаються з window
- *   і все ламається (TypeError).
- *
- * ФІКС: стрілка-обгортка. Метод викликається як `session.game.player.fire()`
- * — implicit binding, this = корабель. Обгортка ще й бере ПОТОЧНОГО гравця
- * на момент натискання (після респауну це вже новий корабель).
- * Альтернативи (.bind, поле-стрілка) описані в README.
+ * Постріл тепер — частина ВВОДУ (fire = Space затиснуто): клієнт не стріляє сам,
+ * а повідомляє серверу намір. Стара історія з `this` (Лаб 2) лишилась у docs/lab-02.md.
  */
 window.addEventListener('keydown', (event) => {
   // У полі вводу (чат, ім'я) клавіші належать полю, а не грі. Виняток — Esc:
@@ -105,8 +117,9 @@ window.addEventListener('keydown', (event) => {
     input.clear(); // клавіші, затиснуті до переходу в чат, не повинні "залипнути"
     chat.focus();
   } else if (event.code === 'Space') {
-    event.preventDefault();
-    session.game.player?.fire();
+    event.preventDefault(); // пробіл не повинен гортати сторінку чи натискати кнопки
+  } else if (event.code === 'KeyN') {
+    netgraph.toggle();
   } else if (event.code === 'Escape') {
     leaveGame();
   }
@@ -180,43 +193,37 @@ async function loadAssets() {
 
 lobby.addEventListener('joined', (event) => startGame(event.detail));
 
-function startGame({ room, name, arena }) {
+function startGame({ room, name }) {
   lobbyUi.hide(); // зняти слухачі лобі; мережа вже зупинена в lobby.join()
 
   const controller = new AbortController();
-  const game = new Game({
-    width: renderer.width,
-    height: renderer.height,
-    arena,
-  });
-
-  // `signal` знімає всі слухачі цієї гри одним abort(), коли гравець іде в лобі
-  audio.bind(game.world, { signal: controller.signal });
-  hud.bindGame(game, { signal: controller.signal });
   hud.setPilot(`${name} · ${room.name}`);
-
-  // Мережа: гра поки локальна (координати по мережі — лаба 5), але кімната,
-  // склад гравців і чат — вже справжні, через WebSocket-сервер.
   chat.reset();
-  const net = joinRoomSession({
+
+  // Гра — на сервері. Клієнт шле ввід, отримує знімки; кімната, склад
+  // гравців і чат ідуть тим самим WebSocket.
+  const net = createNetGame({
     roomId: room.id,
     name,
     ui: chat,
+    onEvent: (event) => audio.playEvent(event),
     onRejected: ({ reason }) => {
       // сервер не пустив (заповнена/не існує) або з'єднання безнадійне: назад у лобі
       leaveGame({ notice: `Не вдалося увійти в «${room.name}»: ${reason}` });
     },
   });
   chat.onSubmit((text) => net.sendChat(text), { signal: controller.signal });
+  netgraph.bind(net);
+  window.__net = net; // для налагодження в консолі: __net.lag.configure({ lag: 100 })
 
-  game.start();
-  session = { game, room, name, controller, net };
+  session = { room, name, controller, net };
   setPhase('game');
 }
 
 function leaveGame({ notice } = {}) {
   session?.controller.abort();
   session?.net.leave(); // 'leave' серверу, закрити сокет, зупинити reconnect
+  netgraph.unbind();
   session = null;
 
   document.activeElement?.blur();

@@ -46,6 +46,7 @@ export async function startApp(env = {}, { files = {} } = {}) {
 export function connect(url, options) {
   const socket = new WebSocket(url, options);
   const messages = [];
+  const frames = []; // бінарні кадри (знімки, pong) у порядку надходження
   const waiters = [];
   let closeInfo = null;
 
@@ -57,7 +58,12 @@ export function connect(url, options) {
   });
   socket.on('error', () => {}); // помилки перевіряємо через close, а не через throw
 
-  socket.on('message', (data) => {
+  socket.on('message', (data, isBinary) => {
+    if (isBinary) {
+      frames.push(new Uint8Array(data));
+      for (const waiter of [...waiters]) waiter.check();
+      return;
+    }
     const message = JSON.parse(data.toString());
     messages.push(message);
     for (const waiter of [...waiters]) waiter.check();
@@ -95,6 +101,7 @@ export function connect(url, options) {
   return {
     socket,
     messages,
+    frames,
     opened,
     closed,
     get closeInfo() {
@@ -107,9 +114,9 @@ export function connect(url, options) {
     waitFor,
     waitForType: (type, timeoutMs) =>
       waitFor((m) => m.type === type, timeoutMs),
-    async join(room = 'training', name = 'Ivan') {
+    async join(room = 'training', name = 'Ivan', codec) {
       await opened;
-      socket.send(JSON.stringify({ type: 'join', v: 1, room, name }));
+      socket.send(JSON.stringify({ type: 'join', v: 2, room, name, codec }));
       return waitFor((m) => m.type === 'welcome');
     },
   };

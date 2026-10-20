@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequestHandler } from './api.js';
 import { ConfigError, loadConfig } from './config.js';
 import { attachMatchLogs } from './log/matchlog.js';
+import { attachMatches } from './matches.js';
 import { RoomManager, seedRooms } from './rooms.js';
 import { attachWebSocketServer } from './ws.js';
 
@@ -16,13 +17,18 @@ const SERVER_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export function createApp({ config, logger = console }) {
   const rooms = seedRooms(new RoomManager({ maxRooms: config.maxRooms }));
   const matchLogs = attachMatchLogs(rooms, { dir: config.logDir, logger });
+  const matches = attachMatches(rooms, { logger });
 
   let ws = null;
   const handler = createRequestHandler({
     config,
     rooms,
     logger,
-    stats: () => ({ connections: ws?.connections ?? 0, ...ws?.stats }),
+    stats: () => ({
+      connections: ws?.connections ?? 0,
+      ...ws?.stats,
+      matches: matches.stats(),
+    }),
   });
 
   const server = createServer((req, res) => {
@@ -49,6 +55,7 @@ export function createApp({ config, logger = console }) {
     rooms,
     ws,
     matchLogs,
+    matches,
 
     async start() {
       await new Promise((resolveListen, reject) => {
@@ -80,6 +87,7 @@ export function createApp({ config, logger = console }) {
           config.shutdownGraceMs,
         );
         await ws.close();
+        matches.stopAll();
         await matchLogs.closeAll();
         await httpClosed;
         clearTimeout(force);

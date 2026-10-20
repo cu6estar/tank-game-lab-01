@@ -17,6 +17,7 @@
     "tool:big-log": "node tools/make-big-log.js"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "@tank/shared": "*"
   }
 }

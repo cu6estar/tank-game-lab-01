@@ -110,7 +110,7 @@ describe('WebSocket: кімнати і чат', () => {
   );
   closesWith(
     'кімнати не існує → 4003',
-    ['{"type":"join","v":1,"room":"nowhere","name":"x"}'],
+    ['{"type":"join","v":2,"room":"nowhere","name":"x"}'],
     CLOSE.JOIN_REJECTED,
   );
 
@@ -136,7 +136,7 @@ describe('WebSocket: кімнати і чат', () => {
   test('повторний join → 4001', async () => {
     const c = connect(t.wsUrl);
     await c.join();
-    c.send({ type: 'join', v: 1, room: 'belt', name: 'again' });
+    c.send({ type: 'join', v: 2, room: 'belt', name: 'again' });
     assert.equal((await c.closed).code, CLOSE.BAD_MESSAGE);
   });
 
@@ -145,7 +145,7 @@ describe('WebSocket: кімнати і чат', () => {
     await a.join('duel', 'A');
     await b.join('duel', 'B');
     c.opened.then(() =>
-      c.send({ type: 'join', v: 1, room: 'duel', name: 'C' }),
+      c.send({ type: 'join', v: 2, room: 'duel', name: 'C' }),
     );
     const { code } = await c.closed;
     assert.equal(code, CLOSE.JOIN_REJECTED);

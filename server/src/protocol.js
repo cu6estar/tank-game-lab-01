@@ -1,21 +1,27 @@
+import { CodecError } from '@tank/shared/codec/errors.js';
+import { validateInputs } from '@tank/shared/codec/input-validation.js';
+
 /**
- * Протокол чату/кімнат, версія 1. Повідомлення — JSON-об'єкти з полем `type`.
+ * Протокол чату/кімнат, версія 2 (v1 + кодек, слоти, насіння матчу, input/ping).
+ * Гру передають бінарні кадри (docs/protocol-v1.md) або JSON-еквіваленти нижче. Повідомлення — JSON-об'єкти з полем `type`.
  *
  * Клієнт → сервер:
- *   { type: 'join',  v: 1, room: '<id>', name: '<1–16 символів>' }   перше повідомлення
+ *   { type: 'join',  v: 2, room: '<id>', name: '<1–16 символів>', codec?: 'binary'|'json' }
+ *   { type: 'input', inputs: [{ seq, throttle, turn, turretTurn, fire }] }   (лише кодек json)
+ *   { type: 'ping',  t }
  *   { type: 'chat',  text: '<1–200 символів>' }
  *   { type: 'leave' }
  *
  * Сервер → клієнт:
- *   { type: 'welcome', v: 1, you: { id, name }, room: { id, name } }
- *   { type: 'roster',  players: [{ id, name }] }                     при вході/виході
+ *   { type: 'welcome', v: 2, you: { id, name }, room: { id, name }, match: { seed, tickRate, codec } }
+ *   { type: 'roster',  players: [{ id, name, slot }] }               при вході/виході
  *   { type: 'chat',    from: { id, name }, text, t }
  *   { type: 'error',   code, message }                               перед закриттям сокета
  *
  * Серверу не можна вірити, що клієнт — наш: validate() перевіряє КОЖНЕ
  * повідомлення, і будь-яке порушення закінчується закриттям сокета з кодом.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export const NAME_MAX = 16;
 export const CHAT_MAX = 200;
@@ -89,9 +95,12 @@ export function validate(data) {
           CLOSE.BAD_MESSAGE,
           `join.name: рядок 1–${NAME_MAX} символів`,
         );
+      const codec = data.codec ?? 'json';
+      if (codec !== 'json' && codec !== 'binary')
+        return bad(CLOSE.BAD_MESSAGE, 'join.codec: "json" або "binary"');
       return {
         ok: true,
-        message: { type: 'join', v: PROTOCOL_VERSION, room, name },
+        message: { type: 'join', v: PROTOCOL_VERSION, room, name, codec },
       };
     }
 
@@ -108,6 +117,22 @@ export function validate(data) {
     case 'leave':
       return { ok: true, message: { type: 'leave' } };
 
+    case 'input':
+      try {
+        return {
+          ok: true,
+          message: { type: 'input', inputs: validateInputs(data.inputs) },
+        };
+      } catch (error) {
+        if (error instanceof CodecError)
+          return bad(CLOSE.BAD_MESSAGE, error.message);
+        throw error;
+      }
+
+    case 'ping':
+      if (!Number.isFinite(data.t)) return bad(CLOSE.BAD_MESSAGE, 'ping.t');
+      return { ok: true, message: { type: 'ping', t: data.t } };
+
     default:
       // Не повторюємо data.type у відповіді як є: це недовірений рядок
       return bad(CLOSE.UNKNOWN_TYPE, 'невідомий тип повідомлення');
@@ -116,7 +141,13 @@ export function validate(data) {
 
 /** Серверні повідомлення збираємо в одному місці, щоб форма не роз'їжджалась. */
 export const server = {
-  welcome: (you, room) => ({ type: 'welcome', v: PROTOCOL_VERSION, you, room }),
+  welcome: (you, room, match = null) => ({
+    type: 'welcome',
+    v: PROTOCOL_VERSION,
+    you,
+    room,
+    match,
+  }),
   roster: (players) => ({ type: 'roster', players }),
   chat: (from, text, t = Date.now()) => ({ type: 'chat', from, text, t }),
   error: (code, message) => ({ type: 'error', code, message }),

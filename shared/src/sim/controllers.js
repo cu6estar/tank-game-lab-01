@@ -1,6 +1,6 @@
 import { wrapAngle } from './vector.js';
 
-const IDLE = Object.freeze({
+export const IDLE = Object.freeze({
   throttle: 0,
   turn: 0,
   turretTurn: 0,
@@ -8,26 +8,6 @@ const IDLE = Object.freeze({
 });
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-
-/**
- * Контролер гравця: читає клавіші з `world.inputs` (той самий об'єкт, що
- * передали у `world.step(dt, inputs)`). Стрільба сюди не входить —
- * вона йде через keydown-слухач у main.js (див. README про `this`).
- */
-export function playerController(ship, world) {
-  const input = world.inputs;
-  if (!input) return IDLE;
-
-  const axis = (positive, negative) =>
-    (input.isDown(positive) ? 1 : 0) - (input.isDown(negative) ? 1 : 0);
-
-  return {
-    throttle: axis('ArrowUp', 'ArrowDown'),
-    turn: axis('ArrowRight', 'ArrowLeft'),
-    turretTurn: axis('KeyX', 'KeyZ'),
-    fire: false,
-  };
-}
 
 /** Простий ворожий AI: розвертається до найближчого ворога, тримає дистанцію, стріляє. */
 export function enemyController(ship, world) {

@@ -1,3 +1,5 @@
+import { atan2, cos, hypot, sin } from '../math.js';
+
 const TAU = Math.PI * 2;
 
 /**
@@ -24,7 +26,7 @@ export class Vector2 {
   }
 
   static fromAngle(angle, length = 1) {
-    return new Vector2(Math.cos(angle) * length, Math.sin(angle) * length);
+    return new Vector2(cos(angle) * length, sin(angle) * length);
   }
 
   add(v) {
@@ -44,7 +46,7 @@ export class Vector2 {
   }
 
   length() {
-    return Math.hypot(this.x, this.y);
+    return hypot(this.x, this.y);
   }
 
   normalize() {
@@ -53,17 +55,14 @@ export class Vector2 {
   }
 
   rotate(angle) {
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    return new Vector2(
-      this.x * cos - this.y * sin,
-      this.x * sin + this.y * cos,
-    );
+    const c = cos(angle);
+    const s = sin(angle);
+    return new Vector2(this.x * c - this.y * s, this.x * s + this.y * c);
   }
 
   /** Кут вектора відносно осі X. */
   angle() {
-    return Math.atan2(this.y, this.x);
+    return atan2(this.y, this.x);
   }
 
   lerp(v, t) {

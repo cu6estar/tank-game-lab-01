@@ -1,4 +1,5 @@
 import { Entity } from './entity.js';
+import { exp } from '../math.js';
 import { Vector2 } from './vector.js';
 
 const TAU = Math.PI * 2;
@@ -10,7 +11,7 @@ export const EXPLOSION_LIFETIME = 0.8;
  * їх сотні, а кожній окремий id, Map-запис і sweep були б зайвими.
  */
 export class Explosion extends Entity {
-  constructor({ pos, size = 30, rand = Math.random }) {
+  constructor({ pos, size = 30, rand }) {
     super({ kind: 'explosion', pos, radius: 0 });
     this.wraps = false;
     this.ttl = EXPLOSION_LIFETIME;
@@ -25,7 +26,7 @@ export class Explosion extends Entity {
   }
 
   behave(dt) {
-    const drag = Math.exp(-3 * dt);
+    const drag = exp(-3 * dt);
 
     for (const particle of this.particles) {
       particle.pos = particle.pos.add(particle.vel.scale(dt));

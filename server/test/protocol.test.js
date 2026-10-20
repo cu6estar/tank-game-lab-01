@@ -5,7 +5,7 @@ import { CLOSE, parseMessage } from '../src/protocol.js';
 const join = (extra = {}) =>
   JSON.stringify({
     type: 'join',
-    v: 1,
+    v: 2,
     room: 'training',
     name: 'Ivan',
     ...extra,
@@ -14,9 +14,10 @@ const join = (extra = {}) =>
 test('коректні повідомлення проходять і нормалізуються', () => {
   assert.deepEqual(parseMessage(join({ name: '  Іван   Петренко ' })).message, {
     type: 'join',
-    v: 1,
+    v: 2,
     room: 'training',
     name: 'Іван Петренко',
+    codec: 'json',
   });
   assert.deepEqual(parseMessage('{"type":"chat","text":" hi "}').message, {
     type: 'chat',
@@ -52,7 +53,7 @@ test('невідомий тип → UNKNOWN_TYPE', () => {
 });
 
 test('join: версія, довжина імені, керівні символи', () => {
-  assert.equal(parseMessage(join({ v: 2 })).code, CLOSE.BAD_VERSION);
+  assert.equal(parseMessage(join({ v: 1 })).code, CLOSE.BAD_VERSION);
   assert.equal(parseMessage(join({ v: undefined })).code, CLOSE.BAD_VERSION);
   assert.equal(parseMessage(join({ name: '' })).code, CLOSE.BAD_MESSAGE);
   assert.equal(

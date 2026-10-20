@@ -1,6 +1,6 @@
 import { Connection } from './connection.js';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export function defaultWsUrl(location = globalThis.location) {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -26,6 +26,9 @@ export function joinRoomSession({
   name,
   ui,
   onRejected,
+  codec = 'json',
+  onWelcome,
+  onRoster,
   ...options
 }) {
   let me = null;
@@ -40,6 +43,7 @@ export function joinRoomSession({
       v: PROTOCOL_VERSION,
       room: roomId,
       name,
+      codec,
     }),
     ...options,
   });
@@ -48,6 +52,7 @@ export function joinRoomSession({
     'welcome',
     (message) => {
       me = message.you;
+      onWelcome?.(message);
       ui.setStatus('open', `у мережі · ${message.room.name}`);
       ui.addSystem(
         everOpened
@@ -58,9 +63,14 @@ export function joinRoomSession({
     },
     { signal },
   );
-  connection.on('roster', (message) => ui.setRoster(message.players, me?.id), {
-    signal,
-  });
+  connection.on(
+    'roster',
+    (message) => {
+      ui.setRoster(message.players, me?.id);
+      onRoster?.(message.players, me);
+    },
+    { signal },
+  );
   connection.on('chat', (message) => ui.addChat(message, me?.id), { signal });
   connection.on(
     'error',

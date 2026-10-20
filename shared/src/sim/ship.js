@@ -1,12 +1,16 @@
 import { Entity } from './entity.js';
 import { Bullet } from './bullet.js';
 import { Homing } from './components.js';
+import { exp } from '../math.js';
 import { Vector2 } from './vector.js';
 
 // Фізика перенесена з лаби 1 (integrateTank) без змін у відчуттях.
 const ACCELERATION = 650;
 const REVERSE_ACCELERATION = 450;
-const FRICTION = 0.88;
+// 0.88 за кадр при 60 Гц, виражено через швидкість загасання: v *= exp(-k·dt).
+// (Math.pow дає різні біти в різних рушіях; наш exp — однакові.)
+// Константа записана ЛІТЕРАЛОМ: Math.log теж може відрізнятися між рушіями.
+const FRICTION_RATE = 7.670002290593093; // = -60·ln(0.88)
 const TURN_SPEED = Math.PI * 1.5;
 const TURRET_TURN_SPEED = Math.PI * 2;
 
@@ -40,6 +44,8 @@ export class Ship extends Entity {
     this.maxSpeed = maxSpeed;
     this.fireCooldown = fireCooldown;
     this.cooldown = 0;
+    // seq ввода, який зараз виконується (для мітки кулі; у ворогів завжди 0)
+    this.inputSeq = 0;
     this.turretAngle = angle;
     this.prevTurretAngle = angle;
     this.#hp = maxHp;
@@ -71,7 +77,7 @@ export class Ship extends Entity {
       const k = Math.min(1, (acceleration * dt) / this.maxSpeed);
       this.vel = this.vel.add(target.sub(this.vel).scale(k));
     } else {
-      this.vel = this.vel.scale(Math.pow(FRICTION, dt * 60));
+      this.vel = this.vel.scale(exp(-FRICTION_RATE * dt));
     }
 
     this.cooldown = Math.max(0, this.cooldown - dt);
@@ -95,6 +101,7 @@ export class Ship extends Entity {
       pos: this.pos.add(direction.scale(MUZZLE_DISTANCE)),
       vel: this.vel.add(direction.scale(BULLET_SPEED)),
       owner: this,
+      tag: this.inputSeq & 0xffff,
     });
 
     if (this.has('homingShots')) {

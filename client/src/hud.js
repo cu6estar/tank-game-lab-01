@@ -6,12 +6,6 @@
  * подія на кожну зміну не окупилась би).
  */
 
-const EFFECT_LABELS = {
-  shield: 'щит',
-  rapidFire: 'rapid fire',
-  homingShots: 'homing',
-};
-
 export function createHud(root = document) {
   const el = (id) => root.querySelector(`#${id}`);
   const nodes = {
@@ -39,14 +33,9 @@ export function createHud(root = document) {
   let statsTimer = 0;
 
   return {
-    /** Підписатися на рахунок гри; `signal` знімає слухача при виході в лобі. */
-    bindGame(game, { signal } = {}) {
-      setText('score', game.score);
-      game.addEventListener(
-        'scoreChanged',
-        (event) => setText('score', event.detail.score),
-        { signal },
-      );
+    /** Рахунок приходить у знімку сервера (він єдиний, хто знає, хто кого вбив). */
+    setScore(score) {
+      setText('score', score);
     },
 
     recordStep() {
@@ -67,24 +56,23 @@ export function createHud(root = document) {
       statsTimer = 0;
     },
 
-    /** Раз на кадр: HP, ефекти, відлік до респауну. */
-    update(game) {
-      const player = game.player;
-
-      if (!player) {
-        const seconds = game.respawnIn ?? 0;
-        setText('hp', `знищено — респаун через ${seconds.toFixed(1)} с`);
+    /** Раз на кадр: HP та ефекти нашого корабля (поле `me` сцени). */
+    update(me) {
+      if (!me || me.dead) {
+        setText('hp', 'знищено — чекаємо респаун');
         setText('effects', '—');
         return;
       }
 
-      setText('hp', `${player.hp} / ${player.maxHp}`);
+      setText('hp', `${me.hp} / ${me.maxHp}`);
 
       const active = [];
-      for (const [name, component] of player.eachComponent()) {
-        if (component.remaining === undefined) continue;
-        const left = Math.max(0, component.remaining).toFixed(1);
-        active.push(`${EFFECT_LABELS[name] ?? name} ${left} с`);
+      for (const [key, label] of [
+        ['shield', 'щит'],
+        ['rapid', 'rapid fire'],
+        ['homing', 'homing'],
+      ]) {
+        if (me[key] > 0) active.push(`${label} ${me[key].toFixed(1)} с`);
       }
       setText('effects', active.length > 0 ? active.join(', ') : '—');
     },

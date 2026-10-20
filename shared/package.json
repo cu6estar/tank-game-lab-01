@@ -1,0 +1,15 @@
+{
+  "name": "@tank/shared",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Симуляція, протокол і кодеки — один код для браузера й Node. Без DOM, без node:*.",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "test": "node --test",
+    "hash": "node -e \"import('./src/scenario.js').then(({runScenario})=>console.log(runScenario({seed:20260,steps:1000}).hashes))\"",
+    "hash:chrome": "node tools/hash-chrome.mjs"
+  }
+}

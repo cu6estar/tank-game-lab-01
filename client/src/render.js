@@ -1,7 +1,10 @@
+import { ARENA_HEIGHT, ARENA_WIDTH } from '@tank/shared/constants.js';
+import { NO_SLOT, PICKUP_TYPES } from '@tank/shared/protocol/constants.js';
+
 const TAU = Math.PI * 2;
 
 // Шари: що малюється раніше, те лежить нижче.
-const DRAW_ORDER = ['pickup', 'asteroid', 'ship', 'bullet', 'explosion'];
+const DRAW_ORDER = ['pickups', 'asteroids', 'ships', 'bullets', 'explosions'];
 
 // Спрайт астероїда трохи більший за його коло зіткнень: скеля неправильної
 // форми, а коло зіткнень — вписане. 96 = половина кадру в пікселях атласу.
@@ -25,12 +28,22 @@ export function createRenderer(canvas) {
   let sprites = null;
 
   const drawers = {
-    pickup: drawPickup,
-    asteroid: drawAsteroid,
-    ship: drawShip,
-    bullet: drawBullet,
-    explosion: drawExplosion,
+    pickups: drawPickup,
+    asteroids: drawAsteroid,
+    ships: drawShip,
+    bullets: drawBullet,
+    explosions: drawExplosion,
   };
+
+  // Арена фіксована (1280×720 — вона частина симуляції на сервері), а вікно
+  // довільне: вписуємо арену у вікно зі збереженням пропорцій.
+  const view = { scale: 1, x: 0, y: 0 };
+
+  function updateView() {
+    view.scale = Math.min(width / ARENA_WIDTH, height / ARENA_HEIGHT);
+    view.x = (width - ARENA_WIDTH * view.scale) / 2;
+    view.y = (height - ARENA_HEIGHT * view.scale) / 2;
+  }
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -44,6 +57,7 @@ export function createRenderer(canvas) {
     canvas.style.height = `${height}px`;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    updateView();
   }
 
   /** Підключити спрайтшит: `image` — ImageBitmap, `atlas` — sprites.json. */
@@ -51,41 +65,59 @@ export function createRenderer(canvas) {
     sprites = { image, frames: atlas.frames, scale: atlas.scale ?? 1 };
   }
 
-  function draw(world, alpha) {
-    ctx.clearRect(0, 0, width, height);
+  /** Малює сцену (див. net-game.frame). Без сцени (лобі) — лише тло. */
+  function draw(scene) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#0c110c';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(
+      dpr * view.scale,
+      0,
+      0,
+      dpr * view.scale,
+      dpr * view.x,
+      dpr * view.y,
+    );
 
     drawArena();
-    if (!sprites || !world) return; // у лобі гри ще немає — лише фон
+    if (!sprites || !scene) return;
 
-    for (const kind of DRAW_ORDER) {
-      for (const entity of world.ofKind(kind)) {
-        drawers[kind](entity, alpha);
-      }
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
+    ctx.clip();
+    for (const layer of DRAW_ORDER) {
+      for (const item of scene[layer] ?? []) drawers[layer](item);
     }
+    ctx.restore();
   }
 
   function drawArena() {
     ctx.fillStyle = '#182018';
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = 1;
-
     const grid = 50;
 
-    for (let x = 0; x <= width; x += grid) {
+    for (let x = 0; x <= ARENA_WIDTH; x += grid) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
+      ctx.lineTo(x, ARENA_HEIGHT);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= ARENA_HEIGHT; y += grid) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(ARENA_WIDTH, y);
       ctx.stroke();
     }
 
-    for (let y = 0; y <= height; y += grid) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
-    }
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
   }
 
   /**
@@ -115,42 +147,50 @@ export function createRenderer(canvas) {
     ctx.restore();
   }
 
-  function drawShip(ship, alpha) {
-    const { x, y } = interpolatedPos(ship, alpha);
-    const angle = lerpAngle(ship.prevAngle, ship.angle, alpha);
-    const turretAngle = lerpAngle(
-      ship.prevTurretAngle,
-      ship.turretAngle,
-      alpha,
-    );
-    const team = ship.team === 'player' ? 'player' : 'enemy';
+  function drawShip(ship) {
+    const { x, y } = ship;
+    const enemy = ship.slot === NO_SLOT;
 
     // Корпус і башта — окремі кадри: башта обертається незалежно від корпусу.
-    drawFrame(`hull_${team}`, x, y, angle);
-    drawFrame(`turret_${team}`, x, y, turretAngle);
+    const team = enemy ? 'enemy' : 'player';
+    drawFrame(`hull_${team}`, x, y, ship.angle);
+    drawFrame(`turret_${team}`, x, y, ship.turret);
 
+    if (!enemy) drawPlayerMarker(ship, x, y);
     drawShieldRing(ship, x, y);
     drawHealthBar(ship, x, y);
   }
 
+  /** Кільце під кораблем гравця: зелене — ми, помаранчеве — інші пілоти. */
+  function drawPlayerMarker(ship, x, y) {
+    ctx.save();
+    ctx.strokeStyle = ship.isMe
+      ? 'rgba(111, 211, 106, 0.9)'
+      : 'rgba(255, 170, 60, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 34, 0, TAU);
+    ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.font = 'bold 13px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ship.isMe ? 'ВИ' : `P${ship.slot + 1}`, x, y + 52);
+    ctx.restore();
+  }
+
   function drawShieldRing(ship, x, y) {
-    const shield = ship.getComponent('shield');
-    if (!shield) return;
+    if (!(ship.shield > 0)) return;
 
     // Блимає, коли щит на межі зникнення.
-    if (
-      shield.remaining < 1.5 &&
-      Math.floor(performance.now() / 120) % 2 === 0
-    ) {
+    if (ship.shield < 1.5 && Math.floor(performance.now() / 120) % 2 === 0)
       return;
-    }
 
     ctx.save();
     ctx.strokeStyle = 'rgba(63, 208, 255, 0.9)';
     ctx.fillStyle = 'rgba(63, 208, 255, 0.12)';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(x, y, ship.radius + 8, 0, TAU);
+    ctx.arc(x, y, 36, 0, TAU);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
@@ -158,9 +198,9 @@ export function createRenderer(canvas) {
 
   function drawHealthBar(ship, x, y) {
     const barWidth = 56;
-    const ratio = Math.max(0, ship.hp / ship.maxHp);
+    const ratio = Math.max(0, Math.min(1, ship.hp / ship.maxHp));
     const left = x - barWidth / 2;
-    const top = y - ship.radius - 18;
+    const top = y - 28 - 18;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
     ctx.fillRect(left, top, barWidth, 6);
@@ -170,47 +210,39 @@ export function createRenderer(canvas) {
     ctx.fillRect(left, top, barWidth * ratio, 6);
   }
 
-  function drawAsteroid(asteroid, alpha) {
-    const { x, y } = interpolatedPos(asteroid, alpha);
-    const angle = lerpAngle(asteroid.prevAngle, asteroid.angle, alpha);
-
-    const name = asteroid.has('homing')
+  function drawAsteroid(asteroid) {
+    const name = asteroid.homing
       ? 'asteroid_seeker'
-      : `asteroid_${asteroid.id % ASTEROID_VARIANTS}`;
+      : `asteroid_${asteroid.seed % ASTEROID_VARIANTS}`;
 
     // розмір підганяємо під коло зіткнень, а не під фіксований масштаб атласу
     const k = (asteroid.radius * ASTEROID_SPRITE_FIT) / ASTEROID_SPRITE_HALF;
-    drawFrame(name, x, y, angle, k);
+    drawFrame(name, asteroid.x, asteroid.y, asteroid.angle, k);
   }
 
-  function drawBullet(bullet, alpha) {
-    const { x, y } = interpolatedPos(bullet, alpha);
-
-    const name = bullet.has('homing')
+  function drawBullet(bullet) {
+    const name = bullet.homing
       ? 'bullet_homing'
-      : bullet.team === 'player'
+      : bullet.mine || (bullet.owner !== undefined && bullet.owner !== NO_SLOT)
         ? 'bullet_player'
         : 'bullet_enemy';
 
-    drawFrame(name, x, y, bullet.vel.angle());
+    drawFrame(name, bullet.x, bullet.y, bullet.angle);
   }
 
-  function drawPickup(pickup, alpha) {
-    // Блимає, коли ось-ось зникне.
-    if (pickup.ttl < 3 && Math.floor(performance.now() / 150) % 2 === 0) return;
-
-    const { x, y } = interpolatedPos(pickup, alpha);
-    const style = PICKUP_STYLES[pickup.type];
+  function drawPickup(pickup) {
+    const style = PICKUP_STYLES[PICKUP_TYPES[pickup.type]];
+    if (!style) return;
     const pulse = 1 + 0.1 * Math.sin(performance.now() / 180);
 
     ctx.save();
-    ctx.translate(x, y);
+    ctx.translate(pickup.x, pickup.y);
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
     ctx.strokeStyle = style.color;
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(0, 0, pickup.radius * pulse, 0, TAU);
+    ctx.arc(0, 0, 16 * pulse, 0, TAU);
     ctx.fill();
     ctx.stroke();
 
@@ -224,7 +256,7 @@ export function createRenderer(canvas) {
   }
 
   function drawExplosion(explosion) {
-    const fade = Math.max(0, explosion.ttl / explosion.lifetime);
+    const fade = Math.max(0, 1 - explosion.age / explosion.lifetime);
 
     ctx.save();
     ctx.globalAlpha = fade;
@@ -233,8 +265,8 @@ export function createRenderer(canvas) {
       ctx.fillStyle = fade > 0.55 ? '#ffd23f' : '#ff7a2f';
       ctx.beginPath();
       ctx.arc(
-        particle.pos.x,
-        particle.pos.y,
+        explosion.x + particle.x,
+        explosion.y + particle.y,
         particle.size * (0.4 + fade * 0.6),
         0,
         TAU,
@@ -243,27 +275,6 @@ export function createRenderer(canvas) {
     }
 
     ctx.restore();
-  }
-
-  /**
-   * Позиція для малювання: інтерполяція між попереднім і поточним кроком.
-   * Якщо сутність щойно "загорнулась" через край арени, стрибок великий —
-   * тоді інтерполювати не можна (інакше вона на кадр проїде через весь екран).
-   */
-  function interpolatedPos(entity, alpha) {
-    const jump = entity.prevPos.distanceSqTo(entity.pos);
-    return jump > 100 * 100
-      ? entity.pos
-      : entity.prevPos.lerp(entity.pos, alpha);
-  }
-
-  function lerpAngle(a, b, t) {
-    let difference = b - a;
-
-    while (difference > Math.PI) difference -= TAU;
-    while (difference < -Math.PI) difference += TAU;
-
-    return a + difference * t;
   }
 
   window.addEventListener('resize', resize);

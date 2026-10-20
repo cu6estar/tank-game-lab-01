@@ -5,11 +5,14 @@ import { Entity } from './entity.js';
  * позначається мертвою, а World.step видаляє її в кінці кроку.
  */
 export class Bullet extends Entity {
-  constructor({ pos, vel, owner, damage = 20, ttl = 1.6 }) {
+  constructor({ pos, vel, owner, damage = 20, ttl = 1.6, tag = 0 }) {
     super({ kind: 'bullet', pos, vel, angle: vel.angle(), radius: 4 });
     this.ownerId = owner.id;
     this.team = owner.team;
     this.damage = damage;
     this.ttl = ttl;
+    // Мітка: молодші 16 біт seq вводу, що вистрілив. Клієнт за нею впізнає
+    // свою передбачену кулю серед куль зі знімка.
+    this.tag = tag;
   }
 }

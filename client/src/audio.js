@@ -7,9 +7,10 @@
  * декодуються ще на екрані завантаження — `loadAudio(context, ...)` потребує
  * контекст, а не дозволу грати.
  *
- * З симуляцією модуль не зв'язаний імпортами: `bind(world)` лише підписується на
- * події 'fired' / 'hit' / 'exploded'. Світ про звук нічого не знає.
+ * Симуляцію модуль не знає: `playEvent(event)` отримує події зі знімків сервера.
  */
+
+import { EVENT, KIND_CODE, NO_SLOT } from '@tank/shared/protocol/constants.js';
 
 const UNLOCK_EVENTS = ['pointerdown', 'keydown', 'touchend'];
 
@@ -65,34 +66,28 @@ export function createAudio({
   }
 
   /**
-   * Підписка на події світу. Усі слухачі — стрілки, тому `play` не залежить
-   * від `this`. `signal` дозволяє зняти всі слухачі одним abort()-ом, коли
-   * гру закрито (див. main.js).
+   * Подія зі знімка сервера (або локальне передбачення пострілу) → звук.
+   * Клієнт не симулює влучання, тож про звук дізнається так само, як про
+   * картинку: від сервера. Типи — shared/protocol/constants.js (EVENT, KIND_CODE).
    */
-  function bind(world, { signal } = {}) {
-    const on = (type, handler) =>
-      world.addEventListener(type, handler, { signal });
-
-    on('fired', (event) =>
-      play('shoot', { volume: event.detail.team === 'player' ? 0.7 : 0.35 }),
-    );
-
-    on('hit', (event) =>
-      play('hit', {
-        volume: event.detail.blocked ? 0.25 : 0.6,
-        rate: event.detail.blocked ? 1.6 : 1,
-      }),
-    );
-
-    on('exploded', (event) => {
-      const { kind } = event.detail;
-      if (kind !== 'ship' && kind !== 'asteroid') return;
-
-      play('explosion', {
-        volume: kind === 'ship' ? 0.9 : 0.55,
-        rate: kind === 'ship' ? 0.95 : 1.15,
-      });
-    });
+  function playEvent(event) {
+    switch (event.type) {
+      case EVENT.FIRED:
+        return play('shoot', { volume: event.a === NO_SLOT ? 0.35 : 0.7 });
+      case EVENT.HIT:
+        return play('hit', {
+          volume: event.b ? 0.25 : 0.6,
+          rate: event.b ? 1.6 : 1,
+        });
+      case EVENT.EXPLODED:
+        if (event.a === KIND_CODE.ship)
+          return play('explosion', { volume: 0.9, rate: 0.95 });
+        if (event.a === KIND_CODE.asteroid)
+          return play('explosion', { volume: 0.55, rate: 1.15 });
+        return false;
+      default:
+        return false;
+    }
   }
 
   /** Розблокувати контекст першим жестом гравця (клік, клавіша, дотик). */
@@ -124,7 +119,7 @@ export function createAudio({
     context,
     setBuffers,
     play,
-    bind,
+    playEvent,
     unlockOnGesture,
     setMuted,
     toggleMute() {
