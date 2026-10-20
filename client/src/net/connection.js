@@ -181,7 +181,7 @@ export class Connection extends EventTarget {
     if (typeof raw !== 'string') {
       // бінарний кадр = гра (знімок, pong): шлях приймання теж проходить через інжектор
       const frame = new Uint8Array(raw);
-      return this.#viaLag(() => this.#onBinary?.(frame));
+      return this.#viaLag(() => this.#onBinary?.(frame), 'in');
     }
 
     let message;
@@ -214,12 +214,12 @@ export class Connection extends EventTarget {
         }
       }
     };
-    if (GAME_TYPES.has(message.type)) this.#viaLag(dispatch);
+    if (GAME_TYPES.has(message.type)) this.#viaLag(dispatch, 'in');
     else dispatch();
   }
 
-  #viaLag(fn) {
-    if (this.#lag) this.#lag.pass(fn);
+  #viaLag(fn, channel = 'out') {
+    if (this.#lag) this.#lag.pass(fn, channel);
     else fn();
   }
 

@@ -7,8 +7,10 @@
  *   jitter — ±випадкове відхилення КОЖНОГО пакета, мс (на кожному напрямку)
  *   drop   — відсоток втрачених пакетів, 0–100 (на кожному напрямку)
  *
- * Jitter може переставити пакети місцями — як UDP. Протокол це витримує:
- * знімки впорядковуються за tick, ввід — за seq.
+ * Порядок на кожному напрямку зберігається (як у TCP/WebSocket): пакет, якому
+ * випало менше затримки, чекає попередній — це "head-of-line blocking", через
+ * який у реальній мережі jitter виглядає як пачки пакетів, що приходять разом.
+ * Втрати (drop) — незалежні й безповоротні, як у UDP.
  *
  * Керування: ?lag=100&jitter=30&drop=2 в URL, або вживу через window.__net.lag.
  */
@@ -22,10 +24,12 @@ export function createLagInjector({
   timers = {
     setTimeout: (...a) => globalThis.setTimeout(...a),
     clearTimeout: (t) => globalThis.clearTimeout(t),
+    now: () => performance.now(),
   },
 } = {}) {
   const state = { lag: 0, jitter: 0, drop: 0 };
   const pending = new Set();
+  const lastDue = { in: 0, out: 0 }; // коли вийде останній пакет кожного напрямку
   const stats = { passed: 0, dropped: 0, delayed: 0 };
 
   function configure(next) {
@@ -53,15 +57,17 @@ export function createLagInjector({
    * Пропускає дію `fn` через інжектор: виконує зараз, пізніше або ніколи.
    * Повертає 'now' | 'later' | 'dropped'.
    */
-  function pass(fn) {
+  function pass(fn, channel = 'out') {
     if (random() * 100 < state.drop) {
       stats.dropped += 1;
       return 'dropped';
     }
-    const delay = Math.max(
-      0,
-      state.lag / 2 + (random() * 2 - 1) * state.jitter,
-    );
+    const now = timers.now();
+    const wanted = state.lag / 2 + (random() * 2 - 1) * state.jitter;
+    // не обганяємо попередній пакет цього напрямку (як TCP): head-of-line blocking
+    const due = Math.max(now + Math.max(0, wanted), lastDue[channel]);
+    lastDue[channel] = due;
+    const delay = due - now;
     if (delay <= 0) {
       stats.passed += 1;
       fn();

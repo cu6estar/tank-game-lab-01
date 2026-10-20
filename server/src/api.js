@@ -105,6 +105,17 @@ export function createRequestHandler({
       });
     }
 
+    // Статистика матчів: тривалість кроку (tickMs) і jitter таймера (jitterMs) — те, за
+    // чим видно, що сервер не встигає тримати 30 Гц. Деталі — у README, розділ "Сервер рахує гру".
+    if (pathname === '/api/stats') {
+      if (method !== 'GET')
+        throw new HttpError(405, 'Method Not Allowed', allow(['GET']));
+      return sendJson(res, 200, {
+        uptimeSec: Math.round(process.uptime()),
+        ...stats(),
+      });
+    }
+
     if (pathname === '/api/rooms') {
       if (method === 'GET') return sendJson(res, 200, rooms.list());
       if (method === 'POST') {

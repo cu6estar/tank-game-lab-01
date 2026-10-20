@@ -68,7 +68,7 @@ export function createNetgraph(root) {
 
     const series = [
       [history.rtt, '#5fb8ff', 300],
-      [history.correction, '#ffb454', 60],
+      [history.correction, '#ffb454', 10],
       [history.interval, '#7ee787', 150],
     ];
     for (const [data, color, max] of series) {

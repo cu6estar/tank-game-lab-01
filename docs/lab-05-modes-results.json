@@ -1,0 +1,159 @@
+{
+  "dumb": [
+    126.5,
+    129.0999999998603,
+    196.19999999995343,
+    131.20000000018626,
+    129.10000000009313
+  ],
+  "predict": [
+    47.4000000001397,
+    62.299999999813735,
+    47.0999999998603,
+    46.699999999953434,
+    46.89999999990687
+  ],
+  "full": [
+    63.9000000001397,
+    64.0999999998603,
+    64.19999999995343,
+    63.5,
+    46.5999999998603
+  ],
+  "statsDumb": {
+    "mode": "dumb",
+    "codec": "binary",
+    "state": "open",
+    "slot": 0,
+    "tick": 163,
+    "rtt": 101.19999999995343,
+    "rttAvg": 101.16177162238296,
+    "snapshotAge": 16.299999999813735,
+    "snapshotInterval": 33.37727036600823,
+    "snapshotsPerSec": 30,
+    "bytesIn": 4612,
+    "bytesOut": 822,
+    "inputQueue": 4,
+    "correction": 0,
+    "correctionMax": 0,
+    "delay": 0,
+    "delaySetting": 100,
+    "missed": 0,
+    "starved": 0,
+    "starvedNow": false,
+    "badFrames": 0,
+    "buffered": 64,
+    "lag": {
+      "lag": 100,
+      "jitter": 0,
+      "drop": 0
+    },
+    "lagStats": {
+      "passed": 347,
+      "dropped": 0,
+      "delayed": 350
+    }
+  },
+  "statsPredict": {
+    "mode": "full",
+    "codec": "binary",
+    "state": "open",
+    "slot": 0,
+    "tick": 163,
+    "rtt": 100.39999999990687,
+    "rttAvg": 100.52557332480472,
+    "snapshotAge": 11.899999999906868,
+    "snapshotInterval": 33.350926514376084,
+    "snapshotsPerSec": 30,
+    "bytesIn": 4619,
+    "bytesOut": 822,
+    "inputQueue": 3,
+    "correction": 0.005797663172691298,
+    "correctionMax": 0.011766635117440371,
+    "delay": 100,
+    "delaySetting": 100,
+    "missed": 0,
+    "starved": 0,
+    "starvedNow": false,
+    "badFrames": 0,
+    "buffered": 64,
+    "lag": {
+      "lag": 100,
+      "jitter": 0,
+      "drop": 0
+    },
+    "lagStats": {
+      "passed": 347,
+      "dropped": 0,
+      "delayed": 350
+    }
+  },
+  "statsBreak": {
+    "mode": "full",
+    "codec": "binary",
+    "state": "open",
+    "slot": 0,
+    "tick": 163,
+    "rtt": 101,
+    "rttAvg": 100.90921748488758,
+    "snapshotAge": 15.699999999953434,
+    "snapshotInterval": 33.43302574646881,
+    "snapshotsPerSec": 30,
+    "bytesIn": 4666,
+    "bytesOut": 822,
+    "inputQueue": 3,
+    "correction": 2.0399116954347605,
+    "correctionMax": 3.4209720890013253,
+    "delay": 100,
+    "delaySetting": 100,
+    "missed": 0,
+    "starved": 0,
+    "starvedNow": false,
+    "badFrames": 0,
+    "buffered": 64,
+    "lag": {
+      "lag": 100,
+      "jitter": 0,
+      "drop": 0
+    },
+    "lagStats": {
+      "passed": 347,
+      "dropped": 0,
+      "delayed": 351
+    }
+  },
+  "statsJitter": {
+    "mode": "full",
+    "codec": "binary",
+    "state": "open",
+    "slot": 0,
+    "tick": 162,
+    "rtt": 144,
+    "rttAvg": 111.1872526336431,
+    "snapshotAge": 18.5,
+    "snapshotInterval": 36.615420768594845,
+    "snapshotsPerSec": 28,
+    "bytesIn": 4646,
+    "bytesOut": 822,
+    "inputQueue": 5,
+    "correction": 0.011694663796438774,
+    "correctionMax": 0.01435782861403637,
+    "delay": 100,
+    "delaySetting": 100,
+    "missed": 18,
+    "starved": 1,
+    "starvedNow": false,
+    "badFrames": 0,
+    "buffered": 64,
+    "lag": {
+      "lag": 100,
+      "jitter": 30,
+      "drop": 2
+    },
+    "lagStats": {
+      "passed": 340,
+      "dropped": 5,
+      "delayed": 343
+    }
+  }
+}

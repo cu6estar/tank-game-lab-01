@@ -19,6 +19,7 @@ export default [
     // Node-скрипти: тести, експерименти, конфіг Vite
     files: [
       'client/tests/**/*.js',
+      'client/tools/**/*.{js,mjs}',
       'client/experiments/**/*.{js,mjs}',
       'client/vite.config.js',
     ],
@@ -92,13 +93,17 @@ export default [
     },
   },
   {
-    files: ['shared/test/**/*.js', 'shared/tools/**/*.{js,mjs}'],
+    files: [
+      'shared/test/**/*.js',
+      'shared/tools/**/*.{js,mjs}',
+      'shared/experiments/**/*.{js,mjs}',
+    ],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
     // Сервер: чистий Node, без DOM. Браузерних глобалів тут бути не повинно —
     // якщо в server/ випадково з'явиться `document` чи `window`, ESLint це покаже.
-    files: ['server/**/*.js'],
+    files: ['server/**/*.{js,mjs}'],
     languageOptions: { globals: globals.node },
   },
   {

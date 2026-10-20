@@ -242,6 +242,20 @@ describe('Match через WebSocket', () => {
     assert.equal((await c.closed).code, CLOSE.UNSUPPORTED_DATA);
   });
 
+  test('/api/stats: тривалість кроку, jitter, лічильники', async () => {
+    const c = connect(t.wsUrl);
+    await c.join('belt', 'Stat', 'binary');
+    await sleep(300);
+    const body = await (await fetch(`${t.url}/api/stats`)).json();
+    const m = body.matches.find((x) => x.room === 'belt');
+    assert.ok(m.tick > 5);
+    assert.equal(typeof m.tickMs.avg, 'number');
+    assert.equal(typeof m.jitterMs.max, 'number');
+    assert.equal(m.overruns, 0);
+    assert.ok(m.lastSnapshotBytes > 0);
+    c.socket.close();
+  });
+
   test('матч зупиняється, коли виходить останній гравець; /health показує статистику', async () => {
     const c = connect(t.wsUrl);
     await c.join('frontline', 'S', 'binary');
