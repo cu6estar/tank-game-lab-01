@@ -108,7 +108,7 @@ export default [
   },
   {
     // Шина подій розв'язує симуляцію зі звуком і HUD: sim може імпортувати
-    // лише сусідні файли ('./x.js'), ніколи audio.js / hud.js / render.js.
+    // лише сусідні файли ('./x.ts'), ніколи audio.js / hud.js / render.js.
     files: ['client/src/sim/**/*.js'],
     rules: {
       'no-restricted-imports': [

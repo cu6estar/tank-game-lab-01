@@ -1,11 +1,11 @@
 // Порівняння JSON і бінарного протоколу на реальному матчі: 4 гравці, 30 Гц.
 // Запуск: node shared/tools/bench-protocol.mjs  (--md друкує таблицю для README)
 import { performance } from 'node:perf_hooks';
-import { binaryCodec, jsonCodec } from '../src/codec/index.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, DT, TICK_RATE } from '../src/constants.js';
-import { buildSnapshot } from '../src/protocol/snapshot.js';
-import { scriptedInput } from '../src/scenario.js';
-import { Game } from '../src/sim/game.js';
+import { binaryCodec, jsonCodec } from '../src/codec/index.ts';
+import { ARENA_HEIGHT, ARENA_WIDTH, DT, TICK_RATE } from '../src/constants.ts';
+import { buildSnapshot } from '../src/protocol/snapshot.ts';
+import { scriptedInput } from '../src/scenario.ts';
+import { Game } from '../src/sim/game.ts';
 
 const PLAYERS = 4;
 const STEPS = 1800; // 60 с гри

@@ -1,9 +1,9 @@
 // Експеримент: що буде з `this`, якщо передати ship.fire у слухач події.
 // Запуск: npm run exp:this   (або node experiments/this-bug.js)
 
-import { World } from '../src/sim/world.js';
-import { Ship } from '../src/sim/ship.js';
-import { Vector2 } from '../src/sim/vector.js';
+import { World } from '../src/sim/world.ts';
+import { Ship } from '../src/sim/ship.ts';
+import { Vector2 } from '../src/sim/vector.ts';
 
 // Те, що робить браузер, коли викликає слухача: listener.call(currentTarget, event).
 // Тобто `this` усередині слухача — це елемент/вікно, на якому висить слухач.

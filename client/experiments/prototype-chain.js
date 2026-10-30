@@ -1,9 +1,9 @@
 // Експеримент: ланцюжок прототипів і те, як знаходиться метод.
 // Запуск: npm run exp:proto   (або node experiments/prototype-chain.js)
 
-import { Ship } from '../src/sim/ship.js';
-import { Bullet } from '../src/sim/bullet.js';
-import { Vector2 } from '../src/sim/vector.js';
+import { Ship } from '../src/sim/ship.ts';
+import { Bullet } from '../src/sim/bullet.ts';
+import { Vector2 } from '../src/sim/vector.ts';
 
 const ship = new Ship({ pos: new Vector2(), team: 'player' });
 const owner = ship;

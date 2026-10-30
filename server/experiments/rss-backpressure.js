@@ -8,7 +8,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { join, resolve } from 'node:path';
-import { makeBigLog } from '../tools/make-big-log.js';
+import { makeBigLog } from '../tools/make-big-log.ts';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=')),

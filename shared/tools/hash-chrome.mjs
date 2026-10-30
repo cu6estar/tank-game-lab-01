@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
-import { runScenario } from '../src/scenario.js';
+import { runScenario } from '../src/scenario.ts';
 
 const root = fileURLToPath(new URL('../src/', import.meta.url));
 const server = createServer(async (req, res) => {

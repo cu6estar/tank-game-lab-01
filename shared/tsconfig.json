@@ -1,0 +1,6 @@
+{
+  // Лише src/: без типів Node (жодних Buffer/process/node:*) — shared мусить жити і в браузері.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023", "DOM"], "types": [] },
+  "include": ["src/**/*.ts"]
+}

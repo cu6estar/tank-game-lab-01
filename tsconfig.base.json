@@ -1,0 +1,28 @@
+{
+  // Спільні суворі налаштування. Пакети лише додають lib/types/include.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+
+    // Типи лише перевіряємо (noEmit): запускає .ts Node (type stripping) або Vite.
+    // Тому імпорти пишуться з розширенням .ts, а синтаксис — лише "стираємий".
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true, // без enum / namespace / параметрів-властивостей конструктора
+    "verbatimModuleSyntax": true, // `import type` для типів: те, що стирається, видно в коді
+    "isolatedModules": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true, // arr[i] і map-словники повертають T | undefined
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "useUnknownInCatchVariables": true,
+
+    "skipLibCheck": true,
+    "types": []
+  }
+}

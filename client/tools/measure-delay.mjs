@@ -1,9 +1,9 @@
 // Вибір затримки інтерполяції: симулюємо мережу з jitter і втратами та рахуємо,
 // скільки кадрів клієнт "голодує" (потрібного знімка ще немає) при різних delay.
 // Запуск: node client/tools/measure-delay.mjs [--md]
-import { TICK_MS } from '@tank/shared/constants.js';
-import { createRng } from '@tank/shared/rng.js';
-import { SnapshotBuffer } from '../src/net/snapshot-buffer.js';
+import { TICK_MS } from '@tank/shared/constants.ts';
+import { createRng } from '@tank/shared/rng.ts';
+import { SnapshotBuffer } from '../src/net/snapshot-buffer.ts';
 
 const SIM_MS = 60_000;
 const WARMUP_MS = 3_000;

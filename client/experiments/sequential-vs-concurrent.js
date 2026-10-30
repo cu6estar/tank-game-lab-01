@@ -10,7 +10,7 @@ import {
   loadJson,
   loadImage,
   loadAudio,
-} from '../src/assets/loader.js';
+} from '../src/assets/loader.ts';
 
 const DELAY = Number(process.argv[2] ?? 200);
 const ROOT = new URL('../public/', import.meta.url);

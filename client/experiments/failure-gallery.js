@@ -3,7 +3,7 @@
 // Браузерну версію з екранами та скриншотами див. docs/screenshots/failure-*.png.
 // Запуск: npm run exp:failures
 import { createServer } from 'node:http';
-import { loadAll } from '../src/assets/loader.js';
+import { loadAll } from '../src/assets/loader.ts';
 
 const hits = new Map();
 const server = createServer((req, res) => {

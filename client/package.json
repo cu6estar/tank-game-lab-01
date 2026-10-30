@@ -12,7 +12,8 @@
     "exp:proto": "node experiments/prototype-chain.js",
     "exp:timing": "node experiments/sequential-vs-concurrent.js",
     "exp:puzzles": "node experiments/puzzles.js",
-    "exp:failures": "node experiments/failure-gallery.js"
+    "exp:failures": "node experiments/failure-gallery.js",
+    "typecheck": "tsc --noEmit -p ."
   },
   "devDependencies": {
     "vite": "^7.0.0"
