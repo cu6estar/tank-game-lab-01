@@ -1,5 +1,5 @@
 import { toSeq } from '@tank/shared/brand.ts';
-import { CodecError, getCodec, isCodecName } from '@tank/shared/codec/index.ts';
+import { CodecError, getCodec } from '@tank/shared/codec/index.ts';
 import { peekType } from '@tank/shared/codec/index.ts';
 import { ARENA_HEIGHT, ARENA_WIDTH, TICK_MS } from '@tank/shared/constants.ts';
 import { EVENT, INPUT_REDUNDANCY, MAX_HP, MSG, NO_SLOT } from '@tank/shared/protocol/constants.ts';

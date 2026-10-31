@@ -1,48 +1,53 @@
 import { describeError } from './describe-error.ts';
+import type { ErrorDescription } from './describe-error.ts';
+import type { Renderer } from './render.ts';
 
 const BAR_MAX_WIDTH = 520;
 const BAR_HEIGHT = 22;
 
+export interface LoadingScreen {
+  show(options?: { onCancel?: () => void }): void;
+  hide(): void;
+  setProgress(fraction: number, text?: string): void;
+  setNote(text: string): void;
+  showError(error: unknown): Promise<void>;
+  complete(): Promise<void>;
+}
+
+function requireButton(root: ParentNode, action: string): HTMLButtonElement {
+  const el = root.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
+  if (!el) throw new Error(`loading-screen: кнопки [data-action="${action}"] немає`);
+  return el;
+}
+
 /**
- * Екран завантаження на канвасі. Прогрес-бар справжній: його довжина — це
- * частка вже завантажених файлів із `loadAll`, а не анімація "крутиться".
- * Плавність дає лише згладжування (shown наздоганяє target), але ніколи
- * не випереджає реальний прогрес.
- *
- * Кнопки "Скасувати" / "Повторити" — звичайний DOM поверх канваса.
- *
- *   screen.show({ onCancel })       показати й запустити анімацію
- *   screen.setProgress(f, label)    f у 0…1
- *   screen.setNote(text)            рядок про ретраї
- *   await screen.showError(error)   намалювати помилку; resolve — після "Повторити"
- *   await screen.complete()         довести бар до 100% і сховати екран
+ * Екран завантаження на канвасі. Прогрес-бар справжній: його довжина — частка
+ * вже завантажених файлів із `loadAll`, а не анімація "крутиться".
  */
-export function createLoadingScreen({ renderer, actions }) {
-  const cancelButton = actions.querySelector('[data-action="cancel"]');
-  const retryButton = actions.querySelector('[data-action="retry"]');
+export function createLoadingScreen({ renderer, actions }: { renderer: Renderer; actions: HTMLElement }): LoadingScreen {
+  const cancelButton = requireButton(actions, 'cancel');
+  const retryButton = requireButton(actions, 'retry');
 
   let animationId = 0;
   let target = 0;
   let shown = 0;
   let label = '';
   let note = '';
-  let failure = null;
+  let failure: ErrorDescription | null = null;
   let tick = 0;
-  let cancelHandler = null;
-  let retryResolver = null;
+  let cancelHandler: (() => void) | null = null;
+  let retryResolver: (() => void) | null = null;
 
   cancelButton.addEventListener('click', () => cancelHandler?.());
-  retryButton.addEventListener('click', () => {
-    retryResolver?.();
-  });
+  retryButton.addEventListener('click', () => retryResolver?.());
 
-  function setButtons({ cancel, retry }) {
+  function setButtons({ cancel, retry }: { cancel: boolean; retry: boolean }): void {
     actions.hidden = !cancel && !retry;
     cancelButton.hidden = !cancel;
     retryButton.hidden = !retry;
   }
 
-  function show({ onCancel } = {}) {
+  function show({ onCancel }: { onCancel?: () => void } = {}): void {
     cancelHandler = onCancel ?? null;
     target = 0;
     shown = 0;
@@ -55,14 +60,14 @@ export function createLoadingScreen({ renderer, actions }) {
     animationId = requestAnimationFrame(frame);
   }
 
-  function hide() {
+  function hide(): void {
     cancelAnimationFrame(animationId);
     animationId = 0;
     cancelHandler = null;
     setButtons({ cancel: false, retry: false });
   }
 
-  function frame() {
+  function frame(): void {
     tick += 1;
     shown += (target - shown) * 0.2;
     if (Math.abs(target - shown) < 0.001) shown = target;
@@ -71,7 +76,7 @@ export function createLoadingScreen({ renderer, actions }) {
     animationId = requestAnimationFrame(frame);
   }
 
-  function draw() {
+  function draw(): void {
     const { ctx, width, height } = renderer;
     const cx = width / 2;
     const cy = height / 2;
@@ -92,33 +97,22 @@ export function createLoadingScreen({ renderer, actions }) {
 
     ctx.fillStyle = failure ? '#ff8a7a' : 'rgba(233, 245, 229, 0.55)';
     ctx.font = '16px Consolas, monospace';
-    ctx.fillText(
-      failure ? 'Не вдалося завантажити' : 'Завантаження…',
-      cx,
-      cy - 24,
-    );
+    ctx.fillText(failure ? 'Не вдалося завантажити' : 'Завантаження…', cx, cy - 24);
 
-    // трек
     ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
     ctx.fillRect(left, barTop, barWidth, BAR_HEIGHT);
 
-    // заповнення = реальна частка завантажених файлів
     const fillWidth = barWidth * shown;
     ctx.fillStyle = failure ? '#a8473b' : '#6fd36a';
     ctx.fillRect(left, barTop, fillWidth, BAR_HEIGHT);
 
     if (!failure && fillWidth > 0) {
-      // рухомі смужки на заповненій частині — показують, що екран живий
       ctx.save();
       ctx.beginPath();
       ctx.rect(left, barTop, fillWidth, BAR_HEIGHT);
       ctx.clip();
       ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-      for (
-        let x = left - 40 + ((tick * 1.2) % 40);
-        x < left + fillWidth;
-        x += 40
-      ) {
+      for (let x = left - 40 + ((tick * 1.2) % 40); x < left + fillWidth; x += 40) {
         ctx.beginPath();
         ctx.moveTo(x, barTop + BAR_HEIGHT);
         ctx.lineTo(x + 14, barTop + BAR_HEIGHT);
@@ -163,33 +157,31 @@ export function createLoadingScreen({ renderer, actions }) {
     show,
     hide,
 
-    setProgress(fraction, text) {
+    setProgress(fraction: number, text?: string): void {
       target = Math.max(target, Math.min(1, fraction)); // бар не відкочується
       if (text) label = text;
     },
 
-    setNote(text) {
+    setNote(text: string): void {
       note = text;
     },
 
-    /** Показати помилку й чекати, поки гравець натисне "Повторити". */
-    showError(error) {
+    showError(error: unknown): Promise<void> {
       failure = describeError(error);
       note = '';
       cancelHandler = null;
       setButtons({ cancel: false, retry: true });
       retryButton.focus();
 
-      return new Promise((resolve) => {
-        retryResolver = () => {
+      return new Promise<void>((resolve) => {
+        retryResolver = (): void => {
           retryResolver = null;
           resolve();
         };
       });
     },
 
-    /** Довести бар до 100%, дати оку це побачити, сховати екран. */
-    async complete() {
+    async complete(): Promise<void> {
       target = 1;
       label = 'Готово';
       note = '';
@@ -197,7 +189,7 @@ export function createLoadingScreen({ renderer, actions }) {
 
       const startedAt = performance.now();
       while (shown < 0.995 && performance.now() - startedAt < 600) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
       hide();
     },

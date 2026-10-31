@@ -1,36 +1,37 @@
 /** Чи друкує гравець у полі вводу (чат, ім'я): тоді клавіші не належать грі. */
-export function isTyping(event) {
-  const tag = event.target?.tagName;
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    event.target?.isContentEditable === true
-  );
+export function isTyping(event: Event): boolean {
+  const el = event.target;
+  if (!(el instanceof HTMLElement)) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
 }
 
-export function createInput(target) {
-  const down = new Set();
+export interface InputController {
+  isDown(code: string): boolean;
+  clear(): void;
+}
 
-  function onKeyDown(event) {
+export function createInput(target: Window = window): InputController {
+  const down = new Set<string>();
+
+  const onKeyDown = (event: KeyboardEvent): void => {
     // Z/X/стрілки в чаті — це літери, а не повороти башти
     if (isTyping(event)) return;
     down.add(event.code);
-  }
+  };
 
   // keyup обробляємо завжди: клавіша, відпущена вже в полі вводу, не повинна "залипнути"
-  function onKeyUp(event) {
+  const onKeyUp = (event: KeyboardEvent): void => {
     down.delete(event.code);
-  }
+  };
 
   target.addEventListener('keydown', onKeyDown);
   target.addEventListener('keyup', onKeyUp);
 
   return {
-    isDown(code) {
+    isDown(code: string): boolean {
       return down.has(code);
     },
-    /** Скинути всі натиснуті клавіші (наприклад, коли фокус пішов у чат). */
-    clear() {
+    clear(): void {
       down.clear();
     },
   };

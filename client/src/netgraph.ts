@@ -1,24 +1,29 @@
+import type { NetGame } from './net/net-game.ts';
 import { MODES } from './net/net-game.ts';
+import type { LagKey } from './net/lag.ts';
+import type { Mode } from './net/scene.ts';
 
 const HISTORY = 120; // точок на графіку (≈30 с при оновленні 4 рази/с)
-const MODE_LABELS = {
+const MODE_LABELS: Record<Mode, string> = {
   dumb: 'M1 тупий клієнт',
   predict: 'M2 передбачення',
   full: 'M3 передбачення + інтерполяція',
 };
 
-const fmt = (value, digits = 0, unit = '') =>
-  value === null || value === undefined || Number.isNaN(value)
-    ? '—'
-    : `${value.toFixed(digits)}${unit}`;
+const fmt = (value: number | null | undefined, digits = 0, unit = ''): string =>
+  value === null || value === undefined || Number.isNaN(value) ? '—' : `${value.toFixed(digits)}${unit}`;
+
+export interface Netgraph {
+  bind(netGame: NetGame): void;
+  unbind(): void;
+  toggle(): void;
+}
 
 /**
- * Netgraph: живі цифри мережі + керування умовами. Показує те, без чого
- * налагоджувати netcode неможливо: RTT, вік знімка, трафік, чергу вводів і
- * розмір корекції передбачення. Нижче — елементи керування: режим клієнта,
- * затримка інтерполяції та інжектор лагу (lag/jitter/drop).
+ * Netgraph: живі цифри мережі (RTT, вік знімка, трафік, черга вводів, корекція)
+ * + елементи керування (режим, затримка інтерполяції, інжектор лагу).
  */
-export function createNetgraph(root) {
+export function createNetgraph(root: HTMLElement): Netgraph {
   root.innerHTML = `
     <div class="ng-title">NETGRAPH <small>(N — сховати)</small></div>
     <pre class="ng-text" id="ng-text"></pre>
@@ -44,29 +49,33 @@ export function createNetgraph(root) {
     </details>
   `;
 
-  const text = root.querySelector('#ng-text');
-  const canvas = root.querySelector('canvas');
-  const ctx = canvas.getContext('2d');
-  const history = { rtt: [], correction: [], interval: [] };
-  let game = null;
-  let timer = null;
-  let controller = null;
+  const textEl = root.querySelector<HTMLElement>('#ng-text');
+  const canvas = root.querySelector<HTMLCanvasElement>('canvas');
+  const ctx = canvas?.getContext('2d') ?? null;
+  const history: Record<'rtt' | 'correction' | 'interval', number[]> = { rtt: [], correction: [], interval: [] };
+  let game: NetGame | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let controller: AbortController | null = null;
 
-  const control = (name) => root.querySelector(`[data-ng="${name}"]`);
-  const out = (name) => root.querySelector(`[data-out="${name}"]`);
+  const control = (name: string): HTMLInputElement | null => root.querySelector<HTMLInputElement>(`[data-ng="${name}"]`);
+  const setOut = (name: string, value: string): void => {
+    const node = root.querySelector<HTMLElement>(`[data-out="${name}"]`);
+    if (node) node.textContent = value;
+  };
 
-  function push(list, value) {
+  function push(list: number[], value: number | null): void {
     list.push(value ?? 0);
     if (list.length > HISTORY) list.shift();
   }
 
-  function plot() {
+  function plot(): void {
+    if (!canvas || !ctx) return;
     const { width, height } = canvas;
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     ctx.fillRect(0, 0, width, height);
 
-    const series = [
+    const series: [number[], string, number][] = [
       [history.rtt, '#5fb8ff', 300],
       [history.correction, '#ffb454', 10],
       [history.interval, '#7ee787', 150],
@@ -85,78 +94,79 @@ export function createNetgraph(root) {
     }
   }
 
-  function refresh() {
+  function refresh(): void {
     if (!game) return;
     const s = game.stats();
     push(history.rtt, s.rtt);
     push(history.correction, s.correction);
     push(history.interval, s.snapshotInterval);
 
-    text.textContent = [
-      `режим      ${s.mode}   кодек ${s.codec}   ${s.state}`,
-      `RTT        ${fmt(s.rtt, 0, ' мс')}  (сер. ${fmt(s.rttAvg, 0)})`,
-      `знімок     вік ${fmt(s.snapshotAge, 0, ' мс')}  інтервал ${fmt(s.snapshotInterval, 1, ' мс')}`,
-      `           ${fmt(s.snapshotsPerSec, 0)}/с  втрачено ${s.missed}  голод ${s.starved}`,
-      `трафік     ↓ ${fmt(s.bytesIn, 0, ' Б/с')}  ↑ ${fmt(s.bytesOut, 0, ' Б/с')}`,
-      `черга вв.  ${s.inputQueue}  (непідтверджені)`,
-      `корекція   ${fmt(s.correction, 1, ' px')}  макс ${fmt(s.correctionMax, 1)}`,
-      `інтерп.    ${s.delay} мс в минулому   буфер ${s.buffered}`,
-      `інжектор   lag ${s.lag.lag} ±${s.lag.jitter} drop ${s.lag.drop}% (-${s.lagStats.dropped})`,
-    ].join('\n');
+    if (textEl) {
+      textEl.textContent = [
+        `режим      ${s.mode}   кодек ${s.codec}   ${s.state}`,
+        `RTT        ${fmt(s.rtt, 0, ' мс')}  (сер. ${fmt(s.rttAvg, 0)})`,
+        `знімок     вік ${fmt(s.snapshotAge, 0, ' мс')}  інтервал ${fmt(s.snapshotInterval, 1, ' мс')}`,
+        `           ${fmt(s.snapshotsPerSec, 0)}/с  втрачено ${s.missed}  голод ${s.starved}`,
+        `трафік     ↓ ${fmt(s.bytesIn, 0, ' Б/с')}  ↑ ${fmt(s.bytesOut, 0, ' Б/с')}`,
+        `черга вв.  ${s.inputQueue}  (непідтверджені)`,
+        `корекція   ${fmt(s.correction, 1, ' px')}  макс ${fmt(s.correctionMax, 1)}`,
+        `інтерп.    ${s.delay} мс в минулому   буфер ${s.buffered}`,
+        `інжектор   lag ${s.lag.lag} ±${s.lag.jitter} drop ${s.lag.drop}% (-${s.lagStats.dropped})`,
+      ].join('\n');
+    }
 
-    out('delay').textContent = `${s.delaySetting} мс`;
-    out('lag').textContent = `${s.lag.lag} мс`;
-    out('jitter').textContent = `±${s.lag.jitter} мс`;
-    out('drop').textContent = `${s.lag.drop}%`;
+    setOut('delay', `${s.delaySetting} мс`);
+    setOut('lag', `${s.lag.lag} мс`);
+    setOut('jitter', `±${s.lag.jitter} мс`);
+    setOut('drop', `${s.lag.drop}%`);
     plot();
   }
 
   return {
-    /** Прив'язати до гри; повертає функцію відв'язки. */
-    bind(netGame) {
+    bind(netGame: NetGame): void {
       game = netGame;
       controller?.abort();
       controller = new AbortController();
       const { signal } = controller;
 
-      control('mode').value = game.mode;
-      control('delay').value = game.delayMs;
-      control('lag').value = game.lag.config.lag;
-      control('jitter').value = game.lag.config.jitter;
-      control('drop').value = game.lag.config.drop;
-
-      control('mode').addEventListener(
-        'change',
-        (e) => game.setMode(e.target.value),
-        { signal },
-      );
-      control('delay').addEventListener(
-        'input',
-        (e) => game.setDelay(e.target.value),
-        { signal },
-      );
-      for (const key of ['lag', 'jitter', 'drop']) {
-        control(key).addEventListener(
-          'input',
-          (e) => game.lag.configure({ [key]: e.target.value }),
-          { signal },
-        );
+      const modeEl = control('mode');
+      const delayEl = control('delay');
+      if (modeEl) {
+        modeEl.value = netGame.mode;
+        modeEl.addEventListener('change', () => netGame.setMode(modeEl.value), { signal });
+      }
+      if (delayEl) {
+        delayEl.value = String(netGame.delayMs);
+        delayEl.addEventListener('input', () => netGame.setDelay(delayEl.value), { signal });
+      }
+      for (const key of ['lag', 'jitter', 'drop'] as LagKey[]) {
+        const el = control(key);
+        if (!el) continue;
+        el.value = String(netGame.lag.config[key]);
+        el.addEventListener('input', () => netGame.lag.configure({ [key]: el.value }), { signal });
       }
       // слайдери не повинні "красти" клавіатуру в гри (стрілки рухають повзунок)
       root.addEventListener('keydown', (e) => e.stopPropagation(), { signal });
-      root.addEventListener('change', (e) => e.target.blur?.(), { signal });
+      root.addEventListener(
+        'change',
+        (e) => {
+          const target = e.target;
+          if (target instanceof HTMLElement) target.blur();
+        },
+        { signal },
+      );
 
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
       timer = setInterval(refresh, 250);
       refresh();
     },
-    unbind() {
+    unbind(): void {
       game = null;
       controller?.abort();
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
       timer = null;
     },
-    toggle() {
+    toggle(): void {
       root.hidden = !root.hidden;
     },
   };

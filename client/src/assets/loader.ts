@@ -1,19 +1,14 @@
 /**
  * Конвеєр ассетів: fetch → перевірка `ok` → декодування, усе з AbortSignal.
- *
- *   fetchChecked / fetchJson   спільна основа: кидають HttpError, якщо !response.ok
- *   loadImage / loadAudio / loadJson   по одному ассету
- *   withRetry                  exponential backoff + jitter, без ретраю на 4xx
- *   loadAll                    Promise.all з прогресом по кожному файлу
- *
  * Усі функції приймають `{ fetch }`, тому в тестах мережу підміняє заглушка.
  */
 
 // ------------------------------------------------------------------ помилки
 
-/** Сервер відповів, але зі статусом поза 200–299. fetch сам такого не кидає. */
 export class HttpError extends Error {
-  constructor(url, status, statusText = '') {
+  readonly url: string;
+  readonly status: number;
+  constructor(url: string, status: number, statusText = '') {
     super(`HTTP ${status}${statusText ? ` ${statusText}` : ''} — ${url}`);
     this.name = 'HttpError';
     this.url = url;
@@ -21,18 +16,18 @@ export class HttpError extends Error {
   }
 }
 
-/** Відповідь прийшла, але це не валідний JSON. Повтор нічого не змінить. */
 export class BadJsonError extends Error {
-  constructor(url, cause) {
+  readonly url: string;
+  constructor(url: string, cause: unknown) {
     super(`Некоректний JSON — ${url}`, { cause });
     this.name = 'BadJsonError';
     this.url = url;
   }
 }
 
-/** Байти отримані, але браузер не зміг їх декодувати (картинка/звук битий). */
 export class DecodeError extends Error {
-  constructor(url, cause) {
+  readonly url: string;
+  constructor(url: string, cause: unknown) {
     super(`Не вдалося декодувати — ${url}`, { cause });
     this.name = 'DecodeError';
     this.url = url;
@@ -40,20 +35,20 @@ export class DecodeError extends Error {
 }
 
 export class ManifestError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'ManifestError';
   }
 }
 
+const errName = (error: unknown): string | undefined => (error instanceof Error ? error.name : undefined);
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+
 // ----------------------------------------------------------------- утиліти
 
-/**
- * Один сигнал із кількох: спрацьовує, коли спрацює будь-який із вхідних.
- * AbortSignal.any є в Chrome 116+, нижче — запасний варіант вручну.
- */
-export function mergeSignals(...signals) {
-  const list = signals.filter(Boolean);
+export function mergeSignals(...signals: (AbortSignal | null | undefined)[]): AbortSignal | undefined {
+  const list = signals.filter((s): s is AbortSignal => Boolean(s));
   if (list.length === 0) return undefined;
   if (list.length === 1) return list[0];
   if (typeof AbortSignal.any === 'function') return AbortSignal.any(list);
@@ -64,174 +59,158 @@ export function mergeSignals(...signals) {
       controller.abort(source.reason);
       break;
     }
-    source.addEventListener('abort', () => controller.abort(source.reason), {
-      once: true,
-      signal: controller.signal,
-    });
+    source.addEventListener('abort', () => controller.abort(source.reason), { once: true, signal: controller.signal });
   }
   return controller.signal;
 }
 
 /** Пауза, яку можна перервати: abort одразу відхиляє проміс і гасить таймер. */
-export function sleep(ms, signal) {
-  return new Promise((resolve, reject) => {
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason);
       return;
     }
-
-    const onAbort = () => {
+    const onAbort = (): void => {
       clearTimeout(timer);
-      reject(signal.reason);
+      reject(signal?.reason);
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
-
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
 // ------------------------------------------------------------------- fetch
 
-/**
- * fetch, який нарешті поводиться як очікуєш: 404 і 500 стають помилкою.
- * `timeoutMs` — стеля на ВЕСЬ запит (разом із читанням тіла), окремо для
- * кожної спроби, бо сигнал створюється тут, а не зовні.
- */
-export async function fetchChecked(
-  url,
-  { signal, timeoutMs, fetch: fetchImpl = globalThis.fetch } = {},
-) {
+export interface FetchOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  fetch?: typeof fetch;
+}
+
+export async function fetchChecked(url: string, { signal, timeoutMs, fetch: fetchImpl = globalThis.fetch }: FetchOptions = {}): Promise<Response> {
   const timeoutSignal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
   const requestSignal = mergeSignals(signal, timeoutSignal);
 
   const response = await fetchImpl(url, { signal: requestSignal });
-  if (!response.ok) {
-    throw new HttpError(url, response.status, response.statusText);
-  }
+  if (!response.ok) throw new HttpError(url, response.status, response.statusText);
   return response;
 }
 
-export async function fetchJson(url, options = {}) {
+export async function fetchJson(url: string, options: FetchOptions = {}): Promise<unknown> {
   const response = await fetchChecked(url, options);
-
   try {
     return await response.json();
-  } catch (error) {
+  } catch (error: unknown) {
     // abort під час читання тіла — це не "битий JSON", пропускаємо як є
-    if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
-      throw error;
-    }
+    if (errName(error) === 'AbortError' || errName(error) === 'TimeoutError') throw error;
     throw new BadJsonError(url, error);
   }
 }
 
 // ------------------------------------------------------------------- retry
 
-/**
- * Що вважаємо тимчасовим збоєм (варто повторити):
- *   — 5xx, мережева помилка (fetch кидає TypeError), таймаут запиту.
- * Не повторюємо: 4xx (клієнт сам винен — запит не зміниться), битий JSON,
- * помилку декодування та будь-який abort, який зробили ми самі.
- */
-export function isRetryable(error, signal) {
+export function isRetryable(error: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return false;
   if (error instanceof HttpError) return error.status >= 500;
-  if (error?.name === 'TimeoutError') return true;
+  if (errName(error) === 'TimeoutError') return true;
   return error instanceof TypeError;
 }
 
-/**
- * Повторює `fn`, чекаючи між спробами експоненційно довше + випадково
- * ("full jitter": пауза = random(0, min(maxMs, baseMs · 2^(спроба-1)))).
- * Jitter потрібен, щоб клієнти, які впали одночасно, не повторили одночасно.
- */
-export async function withRetry(
-  fn,
-  {
-    attempts = 3,
-    baseMs = 250,
-    maxMs = 4000,
-    signal,
-    shouldRetry = isRetryable,
-    onRetry,
-    random = Math.random,
-    sleep: sleepImpl = sleep,
-  } = {},
-) {
+export interface RetryInfo {
+  attempt: number;
+  error: unknown;
+  delayMs: number;
+}
+
+export interface RetryOptions {
+  attempts?: number;
+  baseMs?: number;
+  maxMs?: number;
+  signal?: AbortSignal;
+  shouldRetry?: (error: unknown, signal?: AbortSignal) => boolean;
+  onRetry?: (info: RetryInfo) => void;
+  random?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+export interface RetryContext {
+  attempt: number;
+  signal?: AbortSignal;
+}
+
+export async function withRetry<T>(
+  fn: (ctx: RetryContext) => T | Promise<T>,
+  { attempts = 3, baseMs = 250, maxMs = 4000, signal, shouldRetry = isRetryable, onRetry, random = Math.random, sleep: sleepImpl = sleep }: RetryOptions = {},
+): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     signal?.throwIfAborted();
-
     try {
       return await fn({ attempt, signal });
-    } catch (error) {
+    } catch (error: unknown) {
       if (attempt >= attempts || !shouldRetry(error, signal)) throw error;
-
       const ceiling = Math.min(maxMs, baseMs * 2 ** (attempt - 1));
       const delayMs = random() * ceiling;
-
       onRetry?.({ attempt, error, delayMs });
       await sleepImpl(delayMs, signal);
     }
   }
 }
 
-const DEFAULT_RETRY = { attempts: 3, baseMs: 250, maxMs: 3000 };
+const DEFAULT_RETRY: RetryOptions = { attempts: 3, baseMs: 250, maxMs: 3000 };
 const DEFAULT_TIMEOUT_MS = 8000;
 
-/** Запускає завдання з ретраєм (або без, якщо `retry: false`). */
-function run(task, { signal, retry = DEFAULT_RETRY } = {}) {
-  return retry === false ? task() : withRetry(task, { ...retry, signal });
+export interface LoadOptions extends FetchOptions {
+  retry?: RetryOptions | false;
+}
+
+function run<T>(task: (ctx: RetryContext) => Promise<T>, { signal, retry = DEFAULT_RETRY }: LoadOptions = {}): Promise<T> {
+  return retry === false ? task({ attempt: 1, signal }) : withRetry(task, { ...retry, signal });
 }
 
 // ----------------------------------------------------------------- лоадери
 
-export function loadJson(url, options = {}) {
+export function loadJson(url: string, options: LoadOptions = {}): Promise<unknown> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS } = options;
   return run(() => fetchJson(url, { ...options, timeoutMs }), options);
 }
 
-/**
- * Картинка через fetch → Blob → createImageBitmap, а не `new Image()`:
- * лише так видно HTTP-статус (щоб не ретраїти 404) і працює abort.
- */
-export function loadImage(url, options = {}) {
-  const {
-    timeoutMs = DEFAULT_TIMEOUT_MS,
-    decodeImage = (blob) => createImageBitmap(blob),
-    signal,
-  } = options;
+export interface ImageLoadOptions<T = ImageBitmap> extends LoadOptions {
+  decodeImage?: (blob: Blob) => Promise<T>;
+}
 
+export function loadImage<T = ImageBitmap>(url: string, options: ImageLoadOptions<T> = {}): Promise<T> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, decodeImage, signal } = options;
+  // as: запасний декодер — createImageBitmap, коли власний не задано (T = ImageBitmap)
+  const decode = decodeImage ?? ((blob: Blob) => createImageBitmap(blob) as Promise<T>);
   return run(async () => {
     const response = await fetchChecked(url, { ...options, timeoutMs });
     const blob = await response.blob();
     signal?.throwIfAborted();
-
     try {
-      return await decodeImage(blob);
-    } catch (cause) {
+      return await decode(blob);
+    } catch (cause: unknown) {
       throw new DecodeError(url, cause);
     }
   }, options);
 }
 
-/**
- * Звук: fetch → ArrayBuffer → decodeAudioData (асинхронно, поза головним
- * потоком). Декодуємо на екрані завантаження, а не при першому пострілі.
- */
-export function loadAudio(audioContext, url, options = {}) {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = options;
+export interface AudioDecoder<T = AudioBuffer> {
+  decodeAudioData(data: ArrayBuffer): Promise<T>;
+}
 
+export function loadAudio<T = AudioBuffer>(audioContext: AudioDecoder<T>, url: string, options: LoadOptions = {}): Promise<T> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = options;
   return run(async () => {
     const response = await fetchChecked(url, { ...options, timeoutMs });
     const data = await response.arrayBuffer();
     signal?.throwIfAborted();
-
     try {
       return await audioContext.decodeAudioData(data);
-    } catch (cause) {
+    } catch (cause: unknown) {
       throw new DecodeError(url, cause);
     }
   }, options);
@@ -239,106 +218,132 @@ export function loadAudio(audioContext, url, options = {}) {
 
 // ---------------------------------------------------------------- manifest
 
-export function validateManifest(manifest) {
-  if (!manifest || !Array.isArray(manifest.assets)) {
+export type AssetType = 'image' | 'audio' | 'json';
+
+export interface AssetEntry {
+  key: string;
+  type: AssetType;
+  url: string;
+  optional?: boolean;
+}
+
+export interface Manifest {
+  assets: AssetEntry[];
+}
+
+export function validateManifest(manifest: unknown): Manifest {
+  const root = asRecord(manifest);
+  if (!root || !Array.isArray(root['assets'])) {
     throw new ManifestError('manifest.json: очікується { "assets": [...] }');
   }
 
-  const keys = new Set();
-  for (const entry of manifest.assets) {
-    const { key, type, url } = entry ?? {};
-    if (!key || !url || !['image', 'audio', 'json'].includes(type)) {
-      throw new ManifestError(
-        `manifest.json: некоректний запис ${JSON.stringify(entry)}`,
-      );
+  const keys = new Set<string>();
+  const assets: AssetEntry[] = [];
+  for (const entry of root['assets']) {
+    const rec = asRecord(entry);
+    const key = rec?.['key'];
+    const type = rec?.['type'];
+    const url = rec?.['url'];
+    if (typeof key !== 'string' || typeof url !== 'string' || (type !== 'image' && type !== 'audio' && type !== 'json')) {
+      throw new ManifestError(`manifest.json: некоректний запис ${JSON.stringify(entry)}`);
     }
-    if (keys.has(key)) {
-      throw new ManifestError(`manifest.json: дубль ключа "${key}"`);
-    }
+    if (keys.has(key)) throw new ManifestError(`manifest.json: дубль ключа "${key}"`);
     keys.add(key);
+    assets.push({ key, type, url, optional: rec?.['optional'] === true });
   }
-  return manifest;
+  return { assets };
 }
 
-/**
- * Вантажить усе з маніфесту ОДНОЧАСНО (Promise.all) і звітує про прогрес
- * по кожному завершеному файлу: onProgress(done / total, { entry, ok }).
- *
- * Promise.all відхиляється на першій помилці, але не скасовує решту —
- * тому ми самі абортимо спільний контролер, щоб "брати" не качали далі.
- * Ассети з `optional: true` при збої дають null і не валять завантаження.
- */
-export async function loadAll(
-  manifest,
-  { audioContext, onProgress, onRetry, signal, ...loaderOptions } = {},
-) {
-  validateManifest(manifest);
+export interface LoadProgress {
+  entry: AssetEntry;
+  ok: boolean;
+  done: number;
+  total: number;
+}
+
+export interface FailedAsset {
+  entry: AssetEntry;
+  error: unknown;
+}
+
+export interface LoadedAssets {
+  images: Record<string, ImageBitmap | null>;
+  audio: Record<string, AudioBuffer | null>;
+  json: Record<string, unknown>;
+  failed: FailedAsset[];
+}
+
+export interface LoadAllOptions extends LoadOptions {
+  audioContext?: AudioContext;
+  decodeImage?: (blob: Blob) => Promise<ImageBitmap>;
+  onProgress?: (fraction: number, info: LoadProgress) => void;
+  onRetry?: (entry: AssetEntry, info: RetryInfo) => void;
+}
+
+/** Вантажить усе з маніфесту ОДНОЧАСНО (Promise.all) і звітує про прогрес по кожному файлу. */
+export async function loadAll(manifest: unknown, { audioContext, onProgress, onRetry, signal, ...loaderOptions }: LoadAllOptions = {}): Promise<LoadedAssets> {
+  const valid = validateManifest(manifest);
   signal?.throwIfAborted();
 
-  const entries = manifest.assets;
+  const entries = valid.assets;
   const total = entries.length;
   const controller = new AbortController();
   const sharedSignal = mergeSignals(signal, controller.signal);
 
   let done = 0;
-  const failed = [];
+  const failed: FailedAsset[] = [];
 
-  const loadEntry = (entry) => {
-    const options = {
-      ...loaderOptions,
-      signal: sharedSignal,
-      retry:
-        loaderOptions.retry === false
-          ? false
-          : {
-              ...DEFAULT_RETRY,
-              ...loaderOptions.retry,
-              onRetry: (info) => onRetry?.(entry, info),
-            },
-    };
+  const optionsFor = (entry: AssetEntry): ImageLoadOptions => ({
+    ...loaderOptions,
+    ...(sharedSignal ? { signal: sharedSignal } : {}),
+    retry:
+      loaderOptions.retry === false
+        ? false
+        : { ...DEFAULT_RETRY, ...loaderOptions.retry, onRetry: (info) => onRetry?.(entry, info) },
+  });
 
+  const loadEntry = (entry: AssetEntry): Promise<ImageBitmap | AudioBuffer | unknown> => {
+    const options = optionsFor(entry);
     switch (entry.type) {
       case 'image':
         return loadImage(entry.url, options);
       case 'audio':
+        if (!audioContext) throw new Error('loadAll: audioContext потрібен для звуку');
         return loadAudio(audioContext, entry.url, options);
       default:
         return loadJson(entry.url, options);
     }
   };
 
-  const tasks = entries.map(async (entry) => {
-    let value = null;
+  const tasks = entries.map(async (entry): Promise<[AssetEntry, unknown]> => {
+    let value: unknown = null;
     let ok = true;
-
     try {
       value = await loadEntry(entry);
-    } catch (error) {
+    } catch (error: unknown) {
       // optional-ассет тихо перетворюється на null — але не при abort
-      if (!entry.optional || sharedSignal.aborted) throw error;
+      if (!entry.optional || sharedSignal?.aborted) throw error;
       ok = false;
       failed.push({ entry, error });
     }
-
     done += 1;
     onProgress?.(done / total, { entry, ok, done, total });
     return [entry, value];
   });
 
-  let results;
+  let results: [AssetEntry, unknown][];
   try {
     results = await Promise.all(tasks);
-  } catch (error) {
+  } catch (error: unknown) {
     controller.abort(error); // скасувати файли, що ще вантажаться
     throw error;
   }
 
-  const assets = { images: {}, audio: {}, json: {}, failed };
+  const assets: LoadedAssets = { images: {}, audio: {}, json: {}, failed };
   for (const [entry, value] of results) {
-    const bucket = { image: 'images', audio: 'audio', json: 'json' }[
-      entry.type
-    ];
-    assets[bucket][entry.key] = value;
+    if (entry.type === 'image') assets.images[entry.key] = (value as ImageBitmap | null) ?? null;
+    else if (entry.type === 'audio') assets.audio[entry.key] = (value as AudioBuffer | null) ?? null;
+    else assets.json[entry.key] = value;
   }
   return assets;
 }

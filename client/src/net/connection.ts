@@ -86,6 +86,11 @@ export interface Connection {
     listener: (event: ConnectionEventMap[K]) => void,
     options?: AddEventListenerOptions | boolean,
   ): void;
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: AddEventListenerOptions | boolean,
+  ): void;
 }
 
 export class Connection extends EventTarget {

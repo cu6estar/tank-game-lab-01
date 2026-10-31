@@ -1,29 +1,37 @@
 import { describeError } from './describe-error.ts';
+import type { Lobby, LobbyRoom } from './lobby.ts';
 
 const NAME_KEY = 'tank-arena:name';
 
-/**
- * DOM лобі. Нічого не знає про fetch: слухає події Lobby ('loading',
- * 'roomsChanged', 'error') і малює; на кліки відповідає викликом lobby.join().
- *
- * Дані з сервера потрапляють у DOM лише через textContent — без innerHTML,
- * тому назва кімнати на кшталт "<img onerror=…>" залишиться просто текстом.
- */
-export function createLobbyUi(root, lobby) {
-  const form = root.querySelector('#lobby-form');
-  const nameInput = root.querySelector('#player-name');
-  const list = root.querySelector('#room-list');
-  const status = root.querySelector('#lobby-status');
-  const retryButton = root.querySelector('#lobby-retry');
-  const joinButton = root.querySelector('#join');
-  const notice = root.querySelector('#lobby-notice');
+export interface LobbyUi {
+  show(options?: { notice?: string | null }): void;
+  hide(): void;
+}
 
-  let selectedId = null;
-  let listeners = null; // AbortController слухачів, поки лобі видиме
+function required<T extends Element>(root: ParentNode, selector: string): T {
+  const el = root.querySelector<T>(selector);
+  if (!el) throw new Error(`lobby-ui: не знайдено ${selector}`);
+  return el;
+}
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** DOM лобі. Слухає події Lobby ('loading', 'roomsChanged', 'error') і малює. */
+export function createLobbyUi(root: HTMLElement, lobby: Lobby): LobbyUi {
+  const form = required<HTMLFormElement>(root, '#lobby-form');
+  const nameInput = required<HTMLInputElement>(root, '#player-name');
+  const list = required<HTMLElement>(root, '#room-list');
+  const status = required<HTMLElement>(root, '#lobby-status');
+  const retryButton = required<HTMLButtonElement>(root, '#lobby-retry');
+  const joinButton = required<HTMLButtonElement>(root, '#join');
+  const notice = required<HTMLElement>(root, '#lobby-notice');
+
+  let selectedId: string | null = null;
+  let listeners: AbortController | null = null;
 
   nameInput.value = readSavedName();
 
-  function readSavedName() {
+  function readSavedName(): string {
     try {
       return localStorage.getItem(NAME_KEY) ?? '';
     } catch {
@@ -31,7 +39,7 @@ export function createLobbyUi(root, lobby) {
     }
   }
 
-  function saveName(value) {
+  function saveName(value: string): void {
     try {
       localStorage.setItem(NAME_KEY, value);
     } catch {
@@ -39,13 +47,13 @@ export function createLobbyUi(root, lobby) {
     }
   }
 
-  function setStatus(text, { error = false, retry = false } = {}) {
+  function setStatus(text: string, { error = false, retry = false }: { error?: boolean; retry?: boolean } = {}): void {
     status.textContent = text;
     status.classList.toggle('error', error);
     retryButton.hidden = !retry;
   }
 
-  function renderRooms(rooms) {
+  function renderRooms(rooms: LobbyRoom[]): void {
     list.replaceChildren();
 
     if (rooms.length === 0) {
@@ -55,10 +63,7 @@ export function createLobbyUi(root, lobby) {
       list.append(empty);
     }
 
-    // вибір переживає оновлення, поки кімната існує і не заповнилась
-    const stillValid = rooms.some(
-      (room) => room.id === selectedId && room.players < room.maxPlayers,
-    );
+    const stillValid = rooms.some((room) => room.id === selectedId && room.players < room.maxPlayers);
     if (!stillValid) selectedId = null;
 
     for (const room of rooms) {
@@ -86,7 +91,8 @@ export function createLobbyUi(root, lobby) {
 
       const meta = document.createElement('span');
       meta.className = 'room-meta';
-      const { enemies, asteroids } = room.arena;
+      const enemies = room.arena['enemies'];
+      const asteroids = room.arena['asteroids'];
       meta.textContent =
         `${room.players}/${room.maxPlayers} гравців` +
         (enemies !== undefined ? ` · ворогів ${enemies}` : '') +
@@ -101,16 +107,16 @@ export function createLobbyUi(root, lobby) {
     updateJoinState();
   }
 
-  function updateJoinState() {
+  function updateJoinState(): void {
     joinButton.disabled = selectedId === null;
   }
 
-  function setNotice(text) {
+  function setNotice(text: string | null | undefined): void {
     notice.textContent = text ?? '';
     notice.hidden = !text;
   }
 
-  function onSubmit(event) {
+  function onSubmit(event: Event): void {
     event.preventDefault();
     if (selectedId === null) return;
     setNotice(null);
@@ -120,14 +126,13 @@ export function createLobbyUi(root, lobby) {
 
     try {
       lobby.join(selectedId);
-    } catch (error) {
-      setStatus(error.message, { error: true });
+    } catch (error: unknown) {
+      setStatus(errorMessage(error), { error: true });
     }
   }
 
   return {
-    /** Показати лобі й почати оновлення. */
-    show({ notice: text } = {}) {
+    show({ notice: text }: { notice?: string | null } = {}): void {
       root.hidden = false;
       setNotice(text);
       listeners?.abort();
@@ -155,23 +160,15 @@ export function createLobbyUi(root, lobby) {
         'error',
         (event) => {
           const { title, detail } = describeError(event.detail);
-          setStatus(`Не вдалося оновити список кімнат: ${title}. ${detail}`, {
-            error: true,
-            retry: true,
-          });
+          setStatus(`Не вдалося оновити список кімнат: ${title}. ${detail}`, { error: true, retry: true });
         },
         { signal },
       );
 
       form.addEventListener('submit', onSubmit, { signal });
-      retryButton.addEventListener('click', () => lobby.refresh(), { signal });
+      retryButton.addEventListener('click', () => void lobby.refresh(), { signal });
 
-      // Вкладка у фоні — опитувати немає сенсу; повернулись — продовжуємо.
-      document.addEventListener(
-        'visibilitychange',
-        () => (document.hidden ? lobby.stop() : lobby.start()),
-        { signal },
-      );
+      document.addEventListener('visibilitychange', () => (document.hidden ? lobby.stop() : lobby.start()), { signal });
 
       renderRooms(lobby.rooms);
       setStatus('Завантаження кімнат…');
@@ -179,8 +176,7 @@ export function createLobbyUi(root, lobby) {
       nameInput.focus();
     },
 
-    /** Сховати лобі: зняти слухачі й зупинити мережу (abort запиту в польоті). */
-    hide() {
+    hide(): void {
       root.hidden = true;
       listeners?.abort();
       listeners = null;

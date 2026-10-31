@@ -5,15 +5,30 @@ export const ROOMS_URL = '/api/rooms';
 const DEFAULT_NAME = 'Pilot';
 const MAX_NAME_LENGTH = 16;
 
-/** Відповідь сервера має неправильну форму (валідний JSON, але не список кімнат). */
 export class LobbyDataError extends Error {
-  constructor(message) {
+  constructor(message: string) {
     super(message);
     this.name = 'LobbyDataError';
   }
 }
 
-export function normalizeName(raw) {
+export type LobbyArena = Record<string, number>;
+
+export interface LobbyRoom {
+  id: string;
+  name: string;
+  players: number;
+  maxPlayers: number;
+  arena: LobbyArena;
+}
+
+export interface JoinedDetail {
+  room: LobbyRoom;
+  name: string;
+  arena: LobbyArena;
+}
+
+export function normalizeName(raw: unknown): string {
   const name = String(raw ?? '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -21,32 +36,40 @@ export function normalizeName(raw) {
   return name || DEFAULT_NAME;
 }
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+
 /**
- * Перевіряє відповідь /api/rooms. Дані з мережі — недовірені: некоректні
- * записи відкидаються, а якщо список не масив — це помилка, а не "порожнє лобі".
+ * Перевіряє відповідь /api/rooms. Дані з мережі недовірені: некоректні записи
+ * відкидаються, а якщо список не масив — це помилка, а не "порожнє лобі".
  */
-export function parseRooms(data) {
-  if (!Array.isArray(data)) {
-    throw new LobbyDataError('Очікувався масив кімнат');
-  }
+export function parseRooms(data: unknown): LobbyRoom[] {
+  if (!Array.isArray(data)) throw new LobbyDataError('Очікувався масив кімнат');
 
-  const rooms = [];
+  const rooms: LobbyRoom[] = [];
   for (const raw of data) {
-    const valid =
-      raw &&
-      typeof raw.id === 'string' &&
-      typeof raw.name === 'string' &&
-      Number.isFinite(raw.players) &&
-      Number.isFinite(raw.maxPlayers);
-    if (!valid) continue;
+    const rec = asRecord(raw);
+    if (
+      !rec ||
+      typeof rec['id'] !== 'string' ||
+      typeof rec['name'] !== 'string' ||
+      typeof rec['players'] !== 'number' ||
+      !Number.isFinite(rec['players']) ||
+      typeof rec['maxPlayers'] !== 'number' ||
+      !Number.isFinite(rec['maxPlayers'])
+    ) {
+      continue;
+    }
 
-    rooms.push({
-      id: raw.id,
-      name: raw.name,
-      players: raw.players,
-      maxPlayers: raw.maxPlayers,
-      arena: raw.arena && typeof raw.arena === 'object' ? raw.arena : {},
-    });
+    const arena: LobbyArena = {};
+    const rawArena = asRecord(rec['arena']);
+    if (rawArena) {
+      for (const [key, value] of Object.entries(rawArena)) {
+        if (typeof value === 'number') arena[key] = value;
+      }
+    }
+
+    rooms.push({ id: rec['id'], name: rec['name'], players: rec['players'], maxPlayers: rec['maxPlayers'], arena });
   }
 
   if (data.length > 0 && rooms.length === 0) {
@@ -55,38 +78,39 @@ export function parseRooms(data) {
   return rooms;
 }
 
-/**
- * Лобі: дані та мережа, без жодного DOM (його малює lobby-ui.js).
- *
- * Події:
- *   'loading'       почався запит
- *   'roomsChanged'  detail = масив кімнат (після успішного refresh)
- *   'error'         detail = Error (мережа, таймаут, 404/500, битий JSON…)
- *   'joined'        detail = { room, name, arena } — пора стартувати гру
- *
- * Правила запитів:
- *   — кожен має AbortSignal.timeout (усередині fetchChecked);
- *   — новий refresh() спершу скасовує попередній, що ще в польоті;
- *   — stop() (гравець пішов з лобі) скасовує запит і зупиняє таймер.
- */
-export class Lobby extends EventTarget {
-  #controller = null; // AbortController запиту, що зараз у польоті
-  #timer = 0;
-  #running = false;
-  #fetch;
-  #url;
-  #intervalMs;
-  #timeoutMs;
+export interface LobbyOptions {
+  url?: string;
+  intervalMs?: number;
+  timeoutMs?: number;
+  fetch?: typeof fetch;
+}
 
-  rooms = [];
+export interface LobbyEventMap {
+  loading: CustomEvent<undefined>;
+  roomsChanged: CustomEvent<LobbyRoom[]>;
+  error: CustomEvent<unknown>;
+  joined: CustomEvent<JoinedDetail>;
+}
+
+export interface Lobby {
+  addEventListener<K extends keyof LobbyEventMap>(type: K, listener: (event: LobbyEventMap[K]) => void, options?: AddEventListenerOptions | boolean): void;
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: AddEventListenerOptions | boolean): void;
+}
+
+/** Лобі: дані та мережа, без жодного DOM (його малює lobby-ui.ts). */
+export class Lobby extends EventTarget {
+  #controller: AbortController | null = null;
+  #timer: ReturnType<typeof setInterval> | 0 = 0;
+  #running = false;
+  #fetch: typeof fetch;
+  #url: string;
+  #intervalMs: number;
+  #timeoutMs: number;
+
+  rooms: LobbyRoom[] = [];
   playerName = '';
 
-  constructor({
-    url = ROOMS_URL,
-    intervalMs = 4000,
-    timeoutMs = 3000,
-    fetch: fetchImpl = (...args) => globalThis.fetch(...args),
-  } = {}) {
+  constructor({ url = ROOMS_URL, intervalMs = 4000, timeoutMs = 3000, fetch: fetchImpl = (...args) => globalThis.fetch(...args) }: LobbyOptions = {}) {
     super();
     this.#url = url;
     this.#intervalMs = intervalMs;
@@ -94,39 +118,30 @@ export class Lobby extends EventTarget {
     this.#fetch = fetchImpl;
   }
 
-  get running() {
+  get running(): boolean {
     return this.#running;
   }
 
-  /** Чи є запит у польоті (для тестів і індикатора в UI). */
-  get pending() {
+  get pending(): boolean {
     return this.#controller !== null;
   }
 
-  /** Лобі показано: одразу оновити список і далі оновлювати по інтервалу. */
-  start() {
+  start(): void {
     if (this.#running) return;
     this.#running = true;
-
-    this.refresh();
-    // Стрілка зберігає `this` (Lobby); голий this.refresh у setInterval був би
-    // викликаний з this = undefined — той самий баг, що й з ship.fire.
-    this.#timer = setInterval(() => this.refresh(), this.#intervalMs);
+    void this.refresh();
+    this.#timer = setInterval(() => void this.refresh(), this.#intervalMs);
   }
 
-  /** Гравець покинув лобі: зупинити таймер і скасувати запит у польоті. */
-  stop() {
+  stop(): void {
     this.#running = false;
-    clearInterval(this.#timer);
+    if (this.#timer) clearInterval(this.#timer);
     this.#timer = 0;
-
     this.#controller?.abort();
     this.#controller = null;
   }
 
-  async refresh() {
-    // Старий запит більше не потрібен: його відповідь могла б прийти ПІСЛЯ
-    // нової і затерти свіжіші дані.
+  async refresh(): Promise<void> {
     this.#controller?.abort();
 
     const controller = new AbortController();
@@ -134,18 +149,12 @@ export class Lobby extends EventTarget {
     this.dispatchEvent(new CustomEvent('loading'));
 
     try {
-      const data = await fetchJson(this.#url, {
-        signal: controller.signal,
-        timeoutMs: this.#timeoutMs,
-        fetch: this.#fetch,
-      });
+      const data = await fetchJson(this.#url, { signal: controller.signal, timeoutMs: this.#timeoutMs, fetch: this.#fetch });
       const rooms = parseRooms(data);
-
       if (controller.signal.aborted) return;
       this.rooms = rooms;
       this.dispatchEvent(new CustomEvent('roomsChanged', { detail: rooms }));
-    } catch (error) {
-      // abort — наша власна дія (новий refresh або вихід із лобі), не збій
+    } catch (error: unknown) {
       if (controller.signal.aborted) return;
       this.dispatchEvent(new CustomEvent('error', { detail: error }));
     } finally {
@@ -153,18 +162,15 @@ export class Lobby extends EventTarget {
     }
   }
 
-  /** Вступити в кімнату: зупиняє лобі й повідомляє, з яким конфігом арени грати. */
-  join(roomId) {
+  join(roomId: string): JoinedDetail {
     const room = this.rooms.find((candidate) => candidate.id === roomId);
     if (!room) throw new Error(`Кімнату "${roomId}" не знайдено`);
-    if (room.players >= room.maxPlayers) {
-      throw new Error(`Кімната "${room.name}" заповнена`);
-    }
+    if (room.players >= room.maxPlayers) throw new Error(`Кімната "${room.name}" заповнена`);
 
     const name = normalizeName(this.playerName);
     this.stop();
 
-    const detail = { room, name, arena: room.arena };
+    const detail: JoinedDetail = { room, name, arena: room.arena };
     this.dispatchEvent(new CustomEvent('joined', { detail }));
     return detail;
   }

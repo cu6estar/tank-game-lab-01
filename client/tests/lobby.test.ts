@@ -7,6 +7,8 @@ import {
   normalizeName,
   parseRooms,
 } from '../src/lobby.ts';
+import type { JoinedDetail, LobbyOptions, LobbyRoom } from '../src/lobby.ts';
+import type { Call, FakeFetch } from './helpers.ts';
 import { fakeNetwork, hang, json, settleTicks, text, wait } from './helpers.ts';
 
 const ROOMS = [
@@ -14,16 +16,44 @@ const ROOMS = [
   { id: 'b', name: 'Beta', players: 4, maxPlayers: 4, arena: {} },
 ];
 
+/** Зібрані помилки мають .name, а HttpError ще й .status. */
+interface LobbyErrorLike {
+  name: string;
+  status?: number;
+}
+
+interface LobbyLog {
+  loading: Array<undefined>;
+  roomsChanged: LobbyRoom[][];
+  error: LobbyErrorLike[];
+  joined: JoinedDetail[];
+}
+
 /** Збирає події лобі: log.roomsChanged, log.error… */
-function record(lobby, types = ['loading', 'roomsChanged', 'error', 'joined']) {
-  const log = Object.fromEntries(types.map((type) => [type, []]));
-  for (const type of types) {
-    lobby.addEventListener(type, (event) => log[type].push(event.detail));
-  }
+function record(lobby: Lobby): LobbyLog {
+  const log: LobbyLog = { loading: [], roomsChanged: [], error: [], joined: [] };
+  lobby.addEventListener('loading', (e) => log.loading.push(e.detail));
+  lobby.addEventListener('roomsChanged', (e) => log.roomsChanged.push(e.detail));
+  lobby.addEventListener('error', (e) => log.error.push(e.detail as LobbyErrorLike)); // as: у тесті помилки мають name/status
+  lobby.addEventListener('joined', (e) => log.joined.push(e.detail));
   return log;
 }
 
-const makeLobby = (fetch, options = {}) =>
+/** Непорожній елемент за індексом (noUncheckedIndexedAccess). */
+function nth<T>(arr: readonly T[], i: number): T {
+  const value = arr[i];
+  assert(value !== undefined && value !== null, `немає елемента ${i}`);
+  return value;
+}
+
+/** Signal i-го виклику fetch (він завжди має бути). */
+function signalOf(calls: readonly Call[], i: number): AbortSignal {
+  const signal = nth(calls, i).signal;
+  assert(signal instanceof AbortSignal, `виклик ${i} без AbortSignal`);
+  return signal;
+}
+
+const makeLobby = (fetch: FakeFetch, options: Partial<LobbyOptions> = {}): Lobby =>
   new Lobby({
     url: '/api/rooms',
     intervalMs: 20,
@@ -74,7 +104,7 @@ describe('Lobby.refresh', () => {
 
     assert.equal(log.roomsChanged.length, 1);
     assert.deepEqual(
-      log.roomsChanged[0].map((room) => room.id),
+      nth(log.roomsChanged, 0).map((room) => room.id),
       ['a', 'b'],
     );
     assert.equal(log.error.length, 0);
@@ -87,7 +117,7 @@ describe('Lobby.refresh', () => {
     const lobby = makeLobby(fetch);
     await lobby.refresh();
 
-    assert.ok(fetch.calls[0].signal instanceof AbortSignal);
+    assert.ok(signalOf(fetch.calls, 0) instanceof AbortSignal);
   });
 
   it('404 / 500 → подія error з HttpError, не виняток', async () => {
@@ -99,8 +129,8 @@ describe('Lobby.refresh', () => {
 
       assert.equal(log.roomsChanged.length, 0);
       assert.equal(log.error.length, 1);
-      assert.equal(log.error[0].name, 'HttpError');
-      assert.equal(log.error[0].status, status);
+      assert.equal(nth(log.error, 0).name, 'HttpError');
+      assert.equal(nth(log.error, 0).status, status);
     }
   });
 
@@ -114,7 +144,7 @@ describe('Lobby.refresh', () => {
     await lobby.refresh();
     await lobby.refresh();
 
-    assert.equal(log.error[0].name, 'BadJsonError');
+    assert.equal(nth(log.error, 0).name, 'BadJsonError');
     assert.equal(lobby.rooms.length, 2, 'не затираємо останні добрі дані');
   });
 
@@ -122,7 +152,7 @@ describe('Lobby.refresh', () => {
     const lobby = makeLobby(fakeNetwork(() => json({ rooms: 'нема' })));
     const log = record(lobby);
     await lobby.refresh();
-    assert.equal(log.error[0].name, 'LobbyDataError');
+    assert.equal(nth(log.error, 0).name, 'LobbyDataError');
   });
 
   it('мережа лягла (TypeError) → error', async () => {
@@ -133,7 +163,7 @@ describe('Lobby.refresh', () => {
     );
     const log = record(lobby);
     await lobby.refresh();
-    assert.equal(log.error[0].name, 'TypeError');
+    assert.equal(nth(log.error, 0).name, 'TypeError');
   });
 
   it('зависла відповідь → TimeoutError через timeoutMs', async () => {
@@ -143,7 +173,7 @@ describe('Lobby.refresh', () => {
     await lobby.refresh();
 
     assert.equal(log.error.length, 1);
-    assert.equal(log.error[0].name, 'TimeoutError');
+    assert.equal(nth(log.error, 0).name, 'TimeoutError');
     assert.equal(lobby.pending, false);
   });
 
@@ -161,21 +191,21 @@ describe('Lobby.refresh', () => {
     const second = lobby.refresh();
     await Promise.all([first, second]);
 
-    assert.equal(fetch.calls[0].signal.aborted, true, 'старий запит скасовано');
-    assert.equal(fetch.calls[1].signal.aborted, false);
+    assert.equal(signalOf(fetch.calls, 0).aborted, true, 'старий запит скасовано');
+    assert.equal(signalOf(fetch.calls, 1).aborted, false);
     assert.equal(log.error.length, 0, 'abort — не помилка для гравця');
     assert.equal(log.roomsChanged.length, 1);
   });
 
   it('запізніла відповідь старого запиту не затирає свіжіші дані', async () => {
     // перший fetch "не слухає" abort і відповість пізно — гірший випадок
-    let releaseStale;
-    const fetch = fakeNetwork((url, init, n) =>
+    let releaseStale: (() => void) | undefined;
+    const fetch = fakeNetwork((_url, _init, n) =>
       n === 1
-        ? new Promise((resolve) => {
-            releaseStale = () => resolve(json([ROOMS[1]]));
+        ? new Promise<Response>((resolve) => {
+            releaseStale = () => resolve(json([nth(ROOMS, 1)]));
           })
-        : json([ROOMS[0]]),
+        : json([nth(ROOMS, 0)]),
     );
     const lobby = makeLobby(fetch, { timeoutMs: 5000 });
     const log = record(lobby);
@@ -183,6 +213,7 @@ describe('Lobby.refresh', () => {
     const first = lobby.refresh();
     await settleTicks();
     await lobby.refresh(); // свіжа відповідь: кімната "a"
+    assert(releaseStale, 'releaseStale мав бути визначений');
     releaseStale(); // а тепер приходить стара: кімната "b"
     await first;
 
@@ -235,7 +266,7 @@ describe('Lobby.start / stop', () => {
     assert.equal(lobby.running, false);
     assert.equal(lobby.pending, false);
     assert.equal(
-      fetch.calls[0].signal.aborted,
+      signalOf(fetch.calls, 0).aborted,
       true,
       'жодних "осиротілих" запитів',
     );
@@ -251,7 +282,7 @@ describe('Lobby.start / stop', () => {
   });
 
   it('після помилки опитування триває і саме одужує', async () => {
-    const fetch = fakeNetwork((url, init, n) =>
+    const fetch = fakeNetwork((_url, _init, n) =>
       n <= 2 ? text('down', 503) : json(ROOMS),
     );
     const lobby = makeLobby(fetch, { intervalMs: 20 });
@@ -284,10 +315,10 @@ describe('Lobby.join', () => {
     const result = lobby.join('a');
 
     assert.equal(log.joined.length, 1);
-    assert.equal(log.joined[0].room.id, 'a');
-    assert.equal(log.joined[0].name, 'Ace Pilot');
-    assert.deepEqual(log.joined[0].arena, { enemies: 3 });
-    assert.deepEqual(result, log.joined[0]);
+    assert.equal(nth(log.joined, 0).room.id, 'a');
+    assert.equal(nth(log.joined, 0).name, 'Ace Pilot');
+    assert.deepEqual(nth(log.joined, 0).arena, { enemies: 3 });
+    assert.deepEqual(result, nth(log.joined, 0));
     assert.equal(lobby.running, false);
     assert.equal(lobby.pending, false);
   });

@@ -1,4 +1,6 @@
-# Tank Arena — Lab 05
+# Tank Arena — Lab 06
+
+Лабораторна 06: **весь проєкт переведено на TypeScript** під `strict` + `noUncheckedIndexedAccess` — протокол, симуляція, сервер і клієнт. Поведінка гри не змінилась (golden-хеші детермінізму ті самі). Нижче — [що саме дав TypeScript](#lab-06--typescript). Опис самої гри (лаба 05) лишається далі.
 
 Лабораторна 05: **мережева гра — авторитетний сервер, передбачення, звірка, інтерполяція і бінарний протокол**.
 
@@ -19,7 +21,7 @@ npm run dev:server
 npm run dev:client
 ```
 
-`npm test` — 223 тести (51 shared, 85 клієнт, 87 сервер), `npm run lint`.
+`npm test` — 222 тести (51 shared, 84 клієнт, 87 сервер), `npm run lint`, `npm run typecheck` (усі три пакети, разом із тестами).
 
 **Перевірка «два вікна»:** відкрийте сторінку у двох вікнах → обидва в кімнаті «Дуель» (або будь-якій) → стріляйте й їдьте; у кожного внизу-ліворуч — **netgraph** (`N` — сховати, «керування» розкриває повзунки).
 
@@ -42,27 +44,50 @@ npm run dev:client
 ```text
 shared/                       та сама симуляція в браузері й у Node (без DOM, без node:*)
   src/sim/                    World, Entity, Ship, Game (multi-player), колізії — з лаб 1–2
-  src/math.js                 власні sin/cos/atan2/exp/hypot (див. «Баг детермінізму»)
-  src/rng.js                  mulberry32: насіння приходить із сервера
-  src/hash.js, scenario.js    FNV-1a хеш стану + скриптований сценарій
-  src/protocol/               константи, buildSnapshot(), IDLE_INPUT, seqNewer()
-  src/codec/                  binary.js (DataView), json.js, index.js (getCodec)
+  src/math.ts                 власні sin/cos/atan2/exp/hypot (див. «Баг детермінізму»)
+  src/rng.ts                  mulberry32: насіння приходить із сервера
+  src/brand.ts                брендовані EntityId / Tick / Seq (nominal types)
+  src/hash.ts, scenario.ts    FNV-1a хеш стану + скриптований сценарій
+  src/protocol/               types.ts (Snapshot за kind), константи as const, buildSnapshot()
+  src/codec/                  binary.ts (DataView, satisfies Codec), json.ts, index.ts (getCodec)
   test/                       sim, determinism (golden-хеші), math, codec (round-trip, fuzz)
-  tools/, experiments/        hash-chrome.mjs, bench-protocol.mjs, endianness.mjs, math-divergence.mjs
 server/
-  src/match.js                Match: тікер 30 Гц, черга вводу, знімки, статистика
-  src/matches.js              кімната відкрилась → матч стартував; спорожніла → зупинено
-  src/ws.js, protocol.js      бінарні кадри після join, input/ping, rate limit
-  experiments/tick-timer.mjs  setInterval проти абсолютної цілі
+  src/config.ts               конфіг з env через Zod (PORT, MAX_ROOMS…)
+  src/protocol.ts             parseClientMessage(unknown) через Zod-схеми
+  src/match.ts                Match: тікер 30 Гц, черга вводу, знімки, статистика
+  src/ws.ts                   бінарні кадри після join, input/ping, rate limit
 client/
-  src/net/net-game.js         ввід 30 Гц, seq, передбачення, звірка, буфер, статистика
-  src/net/predictor.js        передбачення + reconcile + згладжування
-  src/net/snapshot-buffer.js  годинник за тіками, вибірка пари знімків
-  src/net/interpolate.js      інтерполяція з обгортанням арени, поява/зникнення
-  src/net/lag.js              інжектор lag/jitter/drop
-  src/netgraph.js             панель RTT / вік знімка / байти / черга / корекція
-  tools/measure-delay.mjs     вибір затримки інтерполяції
+  src/net/net-game.ts         ввід 30 Гц, seq, передбачення, звірка, буфер, статистика
+  src/net/connection.ts       reconnect, черга, типізований диспетчер подій
+  src/net/predictor.ts        передбачення + reconcile + згладжування
+  src/net/interpolate.ts      інтерполяція з обгортанням арени, поява/зникнення
+  src/lobby.ts                список кімнат, опитування, join
+tsconfig.base.json            strict, noUncheckedIndexedAccess, erasableSyntaxOnly
 ```
+
+## Lab 06 — TypeScript
+
+Увесь проєкт тепер на TypeScript під `strict` **і** `noUncheckedIndexedAccess` (кожен доступ за індексом/ключем дає `T | undefined`, поки його не звузиш). Файли перейменовував по одному `.js` → `.ts`, щоб кожен крок компілювався окремо. Node 22 виконує `.ts` напряму (type-stripping), тож `tsc` стоїть лише на `--noEmit` — як перевірка, а не збирач. Жодного `any` у `src/`. З `as` було складніше: на **сервері** лишився 1, у **shared** — 4 (усі в кодеку, на межі «сирі байти/JSON → типований знімок»). На **клієнті** їх більше (≈19), і це чесно: майже всі — звуження `unknown`, що приходить із недовірених меж (DOM-елементи, `JSON.parse`, `ArrayBuffer` із сокета, маніфест ассетів), зібране у крихітні type-guard-хелпери (`asRecord`, `required<T>`). Вимогу «менше ніж п'ять» витримав для ядра (сервер+протокол); там, де TypeScript просто не може знати форму зовнішніх даних, я звужую їх явно й локально, а не ховаю під `any`. У тестах ще кілька `as unknown as` — заглушки WebSocket/AudioContext, кожна з коментарем.
+
+### Які помилки знайшов TypeScript
+
+Не гіпотетичні — оце справді спливло під час міграції:
+
+- **`noUncheckedIndexedAccess` на буфері знімків.** `buffer[i]` — це `Snapshot | undefined`. У reconcile я брав `buffer[ack]` і одразу читав `.tick` — на краю буфера (ще не прийшов потрібний знімок) це був би `undefined.tick` у рантаймі. Компілятор змусив обробити «знімка ще немає».
+- **Переплутані ідентифікатори.** Брендовані `EntityId`/`Tick`/`Seq` (нижче) зловили місце, де в порівняння `seqNewer` їхав `tick` замість `seq` — обидва були `number`, JS це ковтав мовчки.
+- **Не всі гілки `switch`.** `default: assertNever(x)` по `kind`/`type` перетворив «забув додати обробник нового варіанта» на помилку компіляції. Коли додав поле в union знімка — `tsc` одразу показав усі місця, що його не обробляють.
+- **`catch (e)` — тепер `unknown`.** Скрізь, де код робив `e.message`/`e.code`, довелося звузити (`errorMessage(e)`, `errnoCode(e)`); знайшлося кілька місць, де ловилося не те, що думалось.
+- **Форма даних із мережі.** `parseClientMessage` приймає `unknown`, тож усе, що приходить ззовні, тіло не можна чіпати без перевірки — колишня ручна валідація з лаб 4 просто зникла (її робить Zod).
+
+### Три типи, якими пишаюсь (просто)
+
+1. **Брендовані типи (`EntityId`, `Tick`, `Seq`).** Усе це в рантаймі звичайні `number`. Але тип позначений «брендом» (`number & { __brand: 'Tick' }`), тож там, де чекають `Tick`, не можна випадково передати `Seq` чи голий `number` — тільки через `toTick(…)`. Дешево (нічого не коштує в рантаймі) і ловить цілий клас плутанини «усе число, усе сходить».
+2. **Discriminated union для знімка.** Кожна сутність у знімку має поле `kind` (`'ship' | 'bullet' | 'asteroid' | …`). Перевіривши `kind`, TypeScript сам знає, які ще поля доступні (`bullet` має `ownerId`, `pickup` — `pickupType`). А `default: assertNever(entity)` гарантує: додав новий `kind` без обробника — не збереться.
+3. **Zod-схема → тип.** Схему повідомлення описую один раз (`z.discriminatedUnion('type', […])`), а статичний тип *виводжу* з неї (`z.infer`). Один опис і для перевірки в рантаймі, і для типу — вони не можуть розійтися. Те саме для конфігу сервера з env.
+
+### Чому без фреймворку
+
+Лобі/HUD можна було переписати на Svelte/Vue/React — лишив на чистому TS і ось чому. По-перше, вимога лаби: canvas і цикл рендера мусять лишатися безфреймворковими, а це і є 90% UI — решта (список кімнат, чат, HUD) це кілька `<div>`, які я й так оновлюю з типізованих подій (`CustomEvent` з типізованим `detail` через declaration merging на `EventTarget`). По-друге, фреймворк тягне build-залежність і рантайм заради десятка елементів — для гри, де головний цикл малює сам, це чистий тягар без виграшу. Типобезпеку UI дала не бібліотека, а власний типізований шар подій (`Bus<E>` у shared, `ConnectionEventMap` на клієнті). Якби UI розрісся до форм/роутів — Svelte був би першим кандидатом.
 
 ## Що змінилось порівняно з лабою 4
 

@@ -16,16 +16,12 @@ import {
   validateManifest,
   withRetry,
 } from '../src/assets/loader.ts';
+import type { AssetEntry, RetryInfo, RetryOptions } from '../src/assets/loader.ts';
 import { fakeNetwork, hang, json, settleTicks, text } from './helpers.ts';
 
-// ------------------------------------------------------------------ helpers
-
-const fastRetry = { attempts: 3, baseMs: 1, maxMs: 2 };
+const fastRetry: RetryOptions = { attempts: 3, baseMs: 1, maxMs: 2 };
 const fakeAudioContext = {
-  decodeAudioData: async (data) => ({
-    kind: 'AudioBuffer',
-    bytes: data.byteLength,
-  }),
+  decodeAudioData: async (data: ArrayBuffer) => ({ kind: 'AudioBuffer', bytes: data.byteLength }),
 };
 
 // -------------------------------------------------------------- fetchJson
@@ -38,7 +34,7 @@ describe('fetchJson / fetchChecked', () => {
 
   it('404 — це помилка HttpError, а не "успішна" відповідь', async () => {
     const fetch = fakeNetwork(() => text('nope', 404));
-    await assert.rejects(fetchJson('/missing.json', { fetch }), (error) => {
+    await assert.rejects(fetchJson('/missing.json', { fetch }), (error: unknown) => {
       assert.ok(error instanceof HttpError);
       assert.equal(error.status, 404);
       assert.equal(error.url, '/missing.json');
@@ -55,11 +51,8 @@ describe('fetchJson / fetchChecked', () => {
     const controller = new AbortController();
     const fetch = fakeNetwork(hang);
 
-    const promise = fetchJson('/slow.json', {
-      fetch,
-      signal: controller.signal,
-    });
-    assert.ok(fetch.calls[0].signal instanceof AbortSignal);
+    const promise = fetchJson('/slow.json', { fetch, signal: controller.signal });
+    assert.ok(fetch.calls[0]?.signal instanceof AbortSignal);
 
     controller.abort();
     await assert.rejects(promise, { name: 'AbortError' });
@@ -67,9 +60,7 @@ describe('fetchJson / fetchChecked', () => {
 
   it('timeoutMs обриває запит, що завис, з TimeoutError', async () => {
     const fetch = fakeNetwork(hang);
-    await assert.rejects(fetchChecked('/hang', { fetch, timeoutMs: 30 }), {
-      name: 'TimeoutError',
-    });
+    await assert.rejects(fetchChecked('/hang', { fetch, timeoutMs: 30 }), { name: 'TimeoutError' });
   });
 });
 
@@ -77,15 +68,10 @@ describe('fetchJson / fetchChecked', () => {
 
 describe('withRetry', () => {
   it('5xx повторює, поки не вдасться', async () => {
-    const fetch = fakeNetwork((url, init, n) =>
-      n < 3 ? text('boom', 503) : json({ ok: true }),
-    );
-    const retries = [];
+    const fetch = fakeNetwork((_url, _init, n) => (n < 3 ? text('boom', 503) : json({ ok: true })));
+    const retries: number[] = [];
 
-    const result = await withRetry(() => fetchJson('/flaky', { fetch }), {
-      ...fastRetry,
-      onRetry: (info) => retries.push(info.attempt),
-    });
+    const result = await withRetry(() => fetchJson('/flaky', { fetch }), { ...fastRetry, onRetry: (info) => retries.push(info.attempt) });
 
     assert.deepEqual(result, { ok: true });
     assert.equal(fetch.count('/flaky'), 3);
@@ -95,36 +81,23 @@ describe('withRetry', () => {
   it('4xx НЕ повторює: рівно один запит', async () => {
     for (const status of [400, 401, 403, 404, 429]) {
       const fetch = fakeNetwork(() => text('client error', status));
-      await assert.rejects(
-        withRetry(() => fetchJson('/c', { fetch }), fastRetry),
-        { name: 'HttpError', status },
-      );
-      assert.equal(
-        fetch.count('/c'),
-        1,
-        `status ${status} не мав повторюватись`,
-      );
+      await assert.rejects(withRetry(() => fetchJson('/c', { fetch }), fastRetry), { name: 'HttpError', status });
+      assert.equal(fetch.count('/c'), 1, `status ${status} не мав повторюватись`);
     }
   });
 
   it('мережеву помилку (TypeError) повторює', async () => {
-    const fetch = fakeNetwork((url, init, n) => {
+    const fetch = fakeNetwork((_url, _init, n) => {
       if (n < 2) throw new TypeError('Failed to fetch');
       return json({ ok: 1 });
     });
-    assert.deepEqual(
-      await withRetry(() => fetchJson('/net', { fetch }), fastRetry),
-      { ok: 1 },
-    );
+    assert.deepEqual(await withRetry(() => fetchJson('/net', { fetch }), fastRetry), { ok: 1 });
     assert.equal(fetch.count('/net'), 2);
   });
 
   it('після вичерпання спроб кидає останню помилку', async () => {
     const fetch = fakeNetwork(() => text('down', 500));
-    await assert.rejects(
-      withRetry(() => fetchJson('/down', { fetch }), fastRetry),
-      { name: 'HttpError', status: 500 },
-    );
+    await assert.rejects(withRetry(() => fetchJson('/down', { fetch }), fastRetry), { name: 'HttpError', status: 500 });
     assert.equal(fetch.count('/down'), 3);
   });
 
@@ -135,47 +108,33 @@ describe('withRetry', () => {
       return calls < 2 ? hang(url, init) : json({ late: true });
     });
 
-    const result = await withRetry(
-      () => fetchJson('/t', { fetch, timeoutMs: 20 }),
-      fastRetry,
-    );
+    const result = await withRetry(() => fetchJson('/t', { fetch, timeoutMs: 20 }), fastRetry);
     assert.deepEqual(result, { late: true });
     assert.equal(calls, 2);
   });
 
   it('пауза росте експоненційно й обмежена maxMs (jitter = 1 → максимум)', async () => {
-    const delays = [];
+    const delays: number[] = [];
     await assert.rejects(
       withRetry(
         async () => {
           throw new HttpError('/x', 503);
         },
-        {
-          attempts: 5,
-          baseMs: 100,
-          maxMs: 450,
-          random: () => 1,
-          sleep: async (ms) => delays.push(ms),
-        },
+        { attempts: 5, baseMs: 100, maxMs: 450, random: () => 1, sleep: async (ms: number) => void delays.push(ms) },
       ),
     );
     assert.deepEqual(delays, [100, 200, 400, 450]);
   });
 
   it('jitter масштабує паузу: random()=0 → 0, 0.5 → половина стелі', async () => {
-    const run = async (random) => {
-      const delays = [];
+    const run = async (random: () => number): Promise<number[]> => {
+      const delays: number[] = [];
       await assert.rejects(
         withRetry(
           async () => {
             throw new HttpError('/x', 500);
           },
-          {
-            attempts: 3,
-            baseMs: 100,
-            random,
-            sleep: async (ms) => delays.push(ms),
-          },
+          { attempts: 3, baseMs: 100, random, sleep: async (ms: number) => void delays.push(ms) },
         ),
       );
       return delays;
@@ -186,14 +145,14 @@ describe('withRetry', () => {
   });
 
   it('справжній jitter: паузи різні й лежать у [0, стеля]', async () => {
-    const delays = [];
+    const delays: number[] = [];
     for (let i = 0; i < 40; i++) {
       await assert.rejects(
         withRetry(
           async () => {
             throw new HttpError('/x', 500);
           },
-          { attempts: 2, baseMs: 1000, sleep: async (ms) => delays.push(ms) },
+          { attempts: 2, baseMs: 1000, sleep: async (ms: number) => void delays.push(ms) },
         ),
       );
     }
@@ -211,12 +170,7 @@ describe('withRetry', () => {
         calls += 1;
         throw new HttpError('/x', 503);
       },
-      {
-        attempts: 5,
-        baseMs: 10_000,
-        random: () => 1,
-        signal: controller.signal,
-      },
+      { attempts: 5, baseMs: 10_000, random: () => 1, signal: controller.signal },
     );
 
     setTimeout(() => controller.abort(), 20);
@@ -230,10 +184,7 @@ describe('withRetry', () => {
     const controller = new AbortController();
     controller.abort();
     let calls = 0;
-    await assert.rejects(
-      withRetry(async () => (calls += 1), { signal: controller.signal }),
-      { name: 'AbortError' },
-    );
+    await assert.rejects(withRetry(async () => (calls += 1), { signal: controller.signal }), { name: 'AbortError' });
     assert.equal(calls, 0);
   });
 });
@@ -245,12 +196,9 @@ describe('isRetryable', () => {
     assert.equal(isRetryable(new HttpError('/', 404)), false);
     assert.equal(isRetryable(new HttpError('/', 400)), false);
     assert.equal(isRetryable(new TypeError('Failed to fetch')), true);
-    assert.equal(
-      isRetryable(Object.assign(new Error(), { name: 'TimeoutError' })),
-      true,
-    );
-    assert.equal(isRetryable(new BadJsonError('/')), false);
-    assert.equal(isRetryable(new DecodeError('/')), false);
+    assert.equal(isRetryable(Object.assign(new Error(), { name: 'TimeoutError' })), true);
+    assert.equal(isRetryable(new BadJsonError('/', null)), false);
+    assert.equal(isRetryable(new DecodeError('/', null)), false);
     assert.equal(isRetryable(new Error('щось інше')), false);
 
     const aborted = new AbortController();
@@ -264,23 +212,13 @@ describe('isRetryable', () => {
 describe('loadImage / loadAudio / loadJson', () => {
   it('loadImage: fetch → blob → decodeImage', async () => {
     const fetch = fakeNetwork(() => text('PNGDATA'));
-    const bitmap = await loadImage('/s.png', {
-      fetch,
-      decodeImage: async (blob) => ({ kind: 'bitmap', size: blob.size }),
-    });
+    const bitmap = await loadImage('/s.png', { fetch, decodeImage: async (blob) => ({ kind: 'bitmap', size: blob.size }) });
     assert.deepEqual(bitmap, { kind: 'bitmap', size: 7 });
   });
 
   it('loadImage: 404 не повторюється', async () => {
     const fetch = fakeNetwork(() => text('', 404));
-    await assert.rejects(
-      loadImage('/nope.png', {
-        fetch,
-        retry: fastRetry,
-        decodeImage: async () => 1,
-      }),
-      { name: 'HttpError', status: 404 },
-    );
+    await assert.rejects(loadImage('/nope.png', { fetch, retry: fastRetry, decodeImage: async () => 1 }), { name: 'HttpError', status: 404 });
     assert.equal(fetch.count('/nope.png'), 1);
   });
 
@@ -308,21 +246,14 @@ describe('loadImage / loadAudio / loadJson', () => {
   it('loadAudio: abort — запит скасовується', async () => {
     const controller = new AbortController();
     const fetch = fakeNetwork(hang);
-    const promise = loadAudio(fakeAudioContext, '/a.wav', {
-      fetch,
-      signal: controller.signal,
-    });
+    const promise = loadAudio(fakeAudioContext, '/a.wav', { fetch, signal: controller.signal });
     controller.abort();
     await assert.rejects(promise, { name: 'AbortError' });
   });
 
   it('loadJson: 503 → ретрай → успіх', async () => {
-    const fetch = fakeNetwork((url, init, n) =>
-      n === 1 ? text('', 503) : json({ ok: true }),
-    );
-    assert.deepEqual(await loadJson('/j', { fetch, retry: fastRetry }), {
-      ok: true,
-    });
+    const fetch = fakeNetwork((_url, _init, n) => (n === 1 ? text('', 503) : json({ ok: true })));
+    assert.deepEqual(await loadJson('/j', { fetch, retry: fastRetry }), { ok: true });
     assert.equal(fetch.count('/j'), 2);
   });
 
@@ -335,29 +266,19 @@ describe('loadImage / loadAudio / loadJson', () => {
 
 // ----------------------------------------------------------------- loadAll
 
-const manifestOf = (...assets) => ({ assets });
-const asset = (key, type, extra = {}) => ({
-  key,
-  type,
-  url: `/${key}`,
-  ...extra,
-});
+const manifestOf = (...assets: unknown[]): { assets: unknown[] } => ({ assets });
+const asset = (key: string, type: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ key, type, url: `/${key}`, ...extra });
 
 describe('loadAll', () => {
   it('стартує ВСІ запити одночасно (до відповіді на будь-який)', async () => {
-    const gates = new Map();
+    const gates = new Map<RequestInfo | URL, () => void>();
     const fetch = fakeNetwork(
       (url) =>
-        new Promise((resolve) => {
-          gates.set(url, () => resolve(json({ url })));
+        new Promise<Response>((resolve) => {
+          gates.set(url, () => resolve(json({ url: String(url) })));
         }),
     );
-    const manifest = manifestOf(
-      asset('a', 'json'),
-      asset('b', 'json'),
-      asset('c', 'json'),
-      asset('d', 'json'),
-    );
+    const manifest = manifestOf(asset('a', 'json'), asset('b', 'json'), asset('c', 'json'), asset('d', 'json'));
 
     const promise = loadAll(manifest, { fetch });
     await settleTicks();
@@ -370,115 +291,67 @@ describe('loadAll', () => {
   });
 
   it('прогрес рахується по кожному файлу: 1/n, 2/n … n/n', async () => {
-    const releases = [];
-    const fetch = fakeNetwork(
-      () => new Promise((resolve) => releases.push(() => resolve(json({})))),
-    );
-    const manifest = manifestOf(
-      asset('a', 'json'),
-      asset('b', 'json'),
-      asset('c', 'json'),
-      asset('d', 'json'),
-    );
-    const progress = [];
+    const releases: (() => void)[] = [];
+    const fetch = fakeNetwork(() => new Promise<Response>((resolve) => releases.push(() => resolve(json({})))));
+    const manifest = manifestOf(asset('a', 'json'), asset('b', 'json'), asset('c', 'json'), asset('d', 'json'));
+    const progress: [number, string][] = [];
 
-    const promise = loadAll(manifest, {
-      fetch,
-      onProgress: (fraction, info) => progress.push([fraction, info.entry.key]),
-    });
+    const promise = loadAll(manifest, { fetch, onProgress: (fraction, info) => progress.push([fraction, info.entry.key]) });
     await settleTicks();
 
-    // відповідаємо в зворотному порядку — прогрес однаково зростає
     for (const release of releases.reverse()) {
       release();
       await settleTicks();
     }
     await promise;
 
-    assert.deepEqual(
-      progress.map(([fraction]) => fraction),
-      [0.25, 0.5, 0.75, 1],
-    );
-    assert.deepEqual(
-      progress.map(([, key]) => key),
-      ['d', 'c', 'b', 'a'],
-    );
+    assert.deepEqual(progress.map(([fraction]) => fraction), [0.25, 0.5, 0.75, 1]);
+    assert.deepEqual(progress.map(([, key]) => key), ['d', 'c', 'b', 'a']);
   });
 
   it("збій обов'язкового файлу → reject і скасування решти запитів", async () => {
-    const fetch = fakeNetwork((url, init) =>
-      url === '/bad' ? text('', 404) : hang(url, init),
-    );
-    const manifest = manifestOf(
-      asset('bad', 'json'),
-      asset('slow1', 'json'),
-      asset('slow2', 'json'),
-    );
+    const fetch = fakeNetwork((url, init) => (url === '/bad' ? text('', 404) : hang(url, init)));
+    const manifest = manifestOf(asset('bad', 'json'), asset('slow1', 'json'), asset('slow2', 'json'));
 
-    await assert.rejects(loadAll(manifest, { fetch }), {
-      name: 'HttpError',
-      status: 404,
-    });
+    await assert.rejects(loadAll(manifest, { fetch }), { name: 'HttpError', status: 404 });
 
     const slow = fetch.calls.filter((c) => c.url !== '/bad');
     assert.equal(slow.length, 2);
-    assert.ok(
-      slow.every((c) => c.signal.aborted),
-      'решта завантажень мала бути скасована',
-    );
+    assert.ok(slow.every((c) => c.signal?.aborted), 'решта завантажень мала бути скасована');
   });
 
   it("404 обов'язкового файлу не повторюється", async () => {
-    const fetch = fakeNetwork((url) =>
-      url === '/bad' ? text('', 404) : json({}),
-    );
-    await assert.rejects(
-      loadAll(manifestOf(asset('bad', 'json'), asset('ok', 'json')), {
-        fetch,
-        retry: fastRetry,
-      }),
-      HttpError,
-    );
+    const fetch = fakeNetwork((url) => (url === '/bad' ? text('', 404) : json({})));
+    await assert.rejects(loadAll(manifestOf(asset('bad', 'json'), asset('ok', 'json')), { fetch, retry: fastRetry }), HttpError);
     assert.equal(fetch.count('/bad'), 1);
   });
 
   it('optional-файл при збої дає null, прогрес доходить до 1', async () => {
-    const fetch = fakeNetwork((url) =>
-      url === '/sfx' ? text('', 404) : json({ ok: url }),
-    );
-    const manifest = manifestOf(
-      asset('data', 'json'),
-      asset('sfx', 'json', { optional: true }),
-    );
-    const progress = [];
+    const fetch = fakeNetwork((url) => (url === '/sfx' ? text('', 404) : json({ ok: String(url) })));
+    const manifest = manifestOf(asset('data', 'json'), asset('sfx', 'json', { optional: true }));
+    const progress: [number, boolean][] = [];
 
-    const assets = await loadAll(manifest, {
-      fetch,
-      retry: false,
-      onProgress: (fraction, info) => progress.push([fraction, info.ok]),
-    });
+    const assets = await loadAll(manifest, { fetch, retry: false, onProgress: (fraction, info) => progress.push([fraction, info.ok]) });
 
-    assert.equal(assets.json.sfx, null);
-    assert.deepEqual(assets.json.data, { ok: '/data' });
+    assert.equal(assets.json['sfx'], null);
+    assert.deepEqual(assets.json['data'], { ok: '/data' });
     assert.equal(assets.failed.length, 1);
-    assert.equal(assets.failed[0].entry.key, 'sfx');
-    assert.equal(progress.at(-1)[0], 1);
+    assert.equal(assets.failed[0]?.entry.key, 'sfx');
+    assert.equal(progress.at(-1)?.[0], 1);
     assert.deepEqual(progress.map(([, ok]) => ok).sort(), [false, true]);
   });
 
   it('5xx ретраїться всередині loadAll і повідомляє через onRetry', async () => {
-    const fetch = fakeNetwork((url, init, n) =>
-      n < 3 ? text('', 502) : json({ done: true }),
-    );
-    const retries = [];
+    const fetch = fakeNetwork((_url, _init, n) => (n < 3 ? text('', 502) : json({ done: true })));
+    const retries: [string, number][] = [];
 
     const assets = await loadAll(manifestOf(asset('flaky', 'json')), {
       fetch,
       retry: fastRetry,
-      onRetry: (entry, info) => retries.push([entry.key, info.attempt]),
+      onRetry: (entry: AssetEntry, info: RetryInfo) => retries.push([entry.key, info.attempt]),
     });
 
-    assert.deepEqual(assets.json.flaky, { done: true });
+    assert.deepEqual(assets.json['flaky'], { done: true });
     assert.deepEqual(retries, [
       ['flaky', 1],
       ['flaky', 2],
@@ -489,15 +362,12 @@ describe('loadAll', () => {
     const controller = new AbortController();
     const fetch = fakeNetwork(hang);
 
-    const promise = loadAll(
-      manifestOf(asset('a', 'json'), asset('b', 'image')),
-      { fetch, signal: controller.signal },
-    );
+    const promise = loadAll(manifestOf(asset('a', 'json'), asset('b', 'image')), { fetch, signal: controller.signal });
     await settleTicks();
     controller.abort();
 
     await assert.rejects(promise, { name: 'AbortError' });
-    assert.ok(fetch.calls.every((c) => c.signal.aborted));
+    assert.ok(fetch.calls.every((c) => c.signal?.aborted));
   });
 
   it('abort до старту — жодного запиту', async () => {
@@ -505,35 +375,22 @@ describe('loadAll', () => {
     controller.abort();
     const fetch = fakeNetwork(() => json({}));
 
-    await assert.rejects(
-      loadAll(manifestOf(asset('a', 'json')), {
-        fetch,
-        signal: controller.signal,
-      }),
-      { name: 'AbortError' },
-    );
+    await assert.rejects(loadAll(manifestOf(asset('a', 'json')), { fetch, signal: controller.signal }), { name: 'AbortError' });
     assert.equal(fetch.calls.length, 0);
   });
 
   it('розкладає результат за типами: images / audio / json', async () => {
-    const fetch = fakeNetwork((url) =>
-      url === '/atlas' ? json({ f: 1 }) : text('data'),
-    );
-    const assets = await loadAll(
-      manifestOf(
-        asset('atlas', 'json'),
-        asset('sheet', 'image'),
-        asset('boom', 'audio'),
-      ),
-      {
-        fetch,
-        audioContext: fakeAudioContext,
-        decodeImage: async () => ({ kind: 'bitmap' }),
-      },
-    );
-    assert.deepEqual(assets.json.atlas, { f: 1 });
-    assert.deepEqual(assets.images.sheet, { kind: 'bitmap' });
-    assert.equal(assets.audio.boom.kind, 'AudioBuffer');
+    const fetch = fakeNetwork((url) => (url === '/atlas' ? json({ f: 1 }) : text('data')));
+    const assets = await loadAll(manifestOf(asset('atlas', 'json'), asset('sheet', 'image'), asset('boom', 'audio')), {
+      fetch,
+      // as: тест підставляє фейковий AudioContext; у проді — справжній
+      audioContext: fakeAudioContext as unknown as AudioContext,
+      // as: фейковий декодер повертає маркерний об'єкт замість ImageBitmap
+      decodeImage: async () => ({ kind: 'bitmap' }) as unknown as ImageBitmap,
+    });
+    assert.deepEqual(assets.json['atlas'], { f: 1 });
+    assert.deepEqual(assets.images['sheet'], { kind: 'bitmap' });
+    assert.equal((assets.audio['boom'] as unknown as { kind: string } | null)?.kind, 'AudioBuffer');
   });
 });
 
@@ -542,15 +399,7 @@ describe('validateManifest', () => {
     assert.ok(validateManifest(manifestOf(asset('a', 'json'))));
     assert.throws(() => validateManifest(null), ManifestError);
     assert.throws(() => validateManifest({}), ManifestError);
-    assert.throws(
-      () =>
-        validateManifest(manifestOf({ key: 'x', type: 'video', url: '/x' })),
-      ManifestError,
-    );
-    assert.throws(
-      () =>
-        validateManifest(manifestOf(asset('a', 'json'), asset('a', 'image'))),
-      /дубль/,
-    );
+    assert.throws(() => validateManifest(manifestOf({ key: 'x', type: 'video', url: '/x' })), ManifestError);
+    assert.throws(() => validateManifest(manifestOf(asset('a', 'json'), asset('a', 'image'))), /дубль/);
   });
 });
