@@ -11,7 +11,9 @@
     "test": "vitest run",
     "hash": "node -e \"import('./src/scenario.ts').then(({runScenario})=>console.log(runScenario({seed:20260,steps:1000}).hashes))\"",
     "hash:chrome": "node tools/hash-chrome.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "bench:sim": "node tools/bench-sim.ts",
+    "bench:load": "node tools/bench-load.ts"
   },
   "dependencies": {
     "zod": "^3.25.76"
