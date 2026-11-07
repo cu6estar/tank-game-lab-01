@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { join } from 'node:path';
-import { after, before, describe, test } from 'node:test';
+import { afterAll as after, beforeAll as before, describe, test } from 'vitest';
 import { resolveStaticPath } from '../src/static.ts';
 import { startApp } from './helpers.ts';
 import type { TestApp } from './helpers.ts';

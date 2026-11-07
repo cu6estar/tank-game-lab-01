@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { CLOSE, parseMessage } from '../src/protocol.ts';
 import type { ClientMessage, ParseResult } from '../src/protocol.ts';
 

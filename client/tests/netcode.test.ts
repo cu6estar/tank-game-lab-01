@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import { toEntityId, toSeq, toTick } from '@tank/shared/brand.ts';
 import { binaryCodec } from '@tank/shared/codec/index.ts';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, TICK_MS } from '@tank/shared/constants.ts';

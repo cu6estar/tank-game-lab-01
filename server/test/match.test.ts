@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, describe, test } from 'node:test';
+import { afterAll as after, beforeAll as before, describe, test } from 'vitest';
 import { toSeq } from '@tank/shared/brand.ts';
 import { binaryCodec } from '@tank/shared/codec/index.ts';
 import type { ClientInput, EncodedFrame, Snapshot } from '@tank/shared/protocol/types.ts';

@@ -6,3 +6,6 @@ dist
 logs
 .env
 logs-experiment
+
+# vitest coverage output
+coverage/

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { toEntityId, toSeq, toTick } from '../src/brand.ts';
 import {

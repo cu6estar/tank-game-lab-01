@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, describe, test } from 'node:test';
+import { afterAll as after, beforeAll as before, describe, test } from 'vitest';
 import { WebSocket } from 'ws';
 import { CLOSE } from '../src/protocol.ts';
 import { connect, sleep, startApp } from './helpers.ts';
@@ -252,5 +252,5 @@ describe('повільний клієнт', () => {
     } finally {
       await t.close();
     }
-  });
+  }, 120_000); // реальні сокети + backpressure: тест за своєю природою довгий (~85 с)
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import { createRng } from '../src/rng.ts';
 import { Ship } from '../src/sim/ship.ts';
 import { Vector2 } from '../src/sim/vector.ts';

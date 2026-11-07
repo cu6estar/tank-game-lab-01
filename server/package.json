@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=../.env src/index.ts",
     "start": "node --env-file-if-exists=../.env src/index.ts",
-    "test": "node --test",
+    "test": "vitest run",
     "exp:order": "node experiments/event-loop-order.js",
     "exp:block": "node experiments/event-loop-block.js",
     "exp:crash": "node experiments/crash-demo.js",

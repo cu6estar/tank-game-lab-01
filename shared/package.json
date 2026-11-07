@@ -8,7 +8,7 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "vitest run",
     "hash": "node -e \"import('./src/scenario.ts').then(({runScenario})=>console.log(runScenario({seed:20260,steps:1000}).hashes))\"",
     "hash:chrome": "node tools/hash-chrome.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"

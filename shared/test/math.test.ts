@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import { atan2, cos, exp, hypot, sin } from '../src/math.ts';
 
 const close = (a: number, b: number, eps: number, label: string): void =>

@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { test } from 'vitest';
+
+// import.meta.dirname не завжди заповнений під Vite/Vitest — беремо з URL
+const here = dirname(fileURLToPath(import.meta.url));
 import { createNdjsonTransform, startMatchLog } from '../src/log/matchlog.ts';
 import type { MatchLog } from '../src/log/matchlog.ts';
 import { ReplayError, listReplays, replay, replayPath } from '../src/log/replay.ts';
@@ -171,7 +175,7 @@ test('listReplays: порожній/відсутній каталог → []', a
 test('graceful shutdown: SIGTERM → код 0, сокети закриті 1001, лог дописаний', async () => {
   const root = await tempDir();
   const logDir = join(root, 'logs');
-  const child = spawn(process.execPath, [join(import.meta.dirname, '../src/index.ts')], {
+  const child = spawn(process.execPath, [join(here, '../src/index.ts')], {
     env: { ...process.env, PORT: '0', HOST: '127.0.0.1', LOG_DIR: logDir, STATIC_DIR: root },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -214,7 +218,7 @@ test('graceful shutdown: SIGTERM → код 0, сокети закриті 1001,
 });
 
 test('невалідний конфіг: процес не стартує, код виходу 2', async () => {
-  const child = spawn(process.execPath, [join(import.meta.dirname, '../src/index.ts')], {
+  const child = spawn(process.execPath, [join(here, '../src/index.ts')], {
     env: { ...process.env, PORT: 'abc' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });

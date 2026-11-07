@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { Room, RoomError, RoomManager, seedRooms, validateRoomInput } from '../src/rooms.ts';
 import type { RoomEventMap } from '../src/rooms.ts';
 import { at, fakePlayer } from './helpers.ts';
