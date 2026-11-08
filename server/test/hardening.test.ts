@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
 import { describe, test } from 'vitest';
-import { startApp } from './helpers.ts';
+import { CLOSE } from '../src/protocol.ts';
+import { connect, startApp } from './helpers.ts';
 
 /** Спроба рукостискання: 'open' — пройшло, 'rejected' — сервер відмовив (не 101). */
 function attempt(url: string, origin?: string): { socket: WebSocket; result: Promise<'open' | 'rejected'> } {
@@ -93,5 +94,40 @@ describe('Ендпоінти моніторингу', () => {
     const ready = await fetch(`${app.url}/ready`).catch(() => null);
     if (ready) assert.equal(ready.status, 503, 'під час drain /ready = 503');
     await closing;
+  });
+});
+
+describe('Флуд битих кадрів', () => {
+  test('флудер відключається; інша кімната й час її кроку не страждають', async () => {
+    const app = await startApp({ RATE_LIMIT_PER_SEC: '50' });
+    try {
+      // жертва-свідок у своїй кімнаті — має пережити флуд у сусідній
+      const witness = connect(app.wsUrl);
+      await witness.join('belt', 'Witness');
+
+      // флудер заходить в іншу кімнату й сипле ~1000 битих кадрів
+      const flooder = connect(app.wsUrl);
+      await flooder.join('frontline', 'Flooder');
+      for (let i = 0; i < 1000; i++) {
+        if (flooder.socket.readyState !== WebSocket.OPEN) break;
+        flooder.socket.send(`{битий кадр ${i}`);
+      }
+
+      // сервер його відключає (битий кадр / ліміт), а не ковтає й не падає
+      const closed = await flooder.closed;
+      const policyCodes: number[] = [CLOSE.BAD_MESSAGE, CLOSE.RATE_LIMIT, CLOSE.UNKNOWN_TYPE];
+      assert.ok(policyCodes.includes(closed.code), `флудер мав закритися політикою, а не ${closed.code}`);
+
+      // свідок досі живий: chat доходить (кімната обслуговується як завжди)
+      witness.send({ type: 'chat', text: 'я тут' });
+      const chat = await witness.waitForType('chat');
+      assert.equal(chat.text, 'я тут');
+
+      // і час кроку по всіх матчах лишається мізерним (флуд його не роздув)
+      const metrics = (await (await fetch(`${app.url}/metrics`)).json()) as { tickMsMax: number };
+      assert.ok(metrics.tickMsMax < 10, `tickMsMax роздувся: ${metrics.tickMsMax} мс`);
+    } finally {
+      await app.close();
+    }
   });
 });
