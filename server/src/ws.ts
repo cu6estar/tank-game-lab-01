@@ -128,7 +128,7 @@ export function attachWebSocketServer({ server, rooms, config, logger = console 
     stats.connections += 1;
     const ip = ipOf(req);
     perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
-    logger.info(`[ws ${state.id}] connected from ${ip}`);
+    logger.info({ ws: state.id, ip }, 'connected');
 
     function closeWith(code: CloseCode, reasonText: string): void {
       if (socket.readyState === WebSocket.OPEN) {
@@ -141,7 +141,7 @@ export function attachWebSocketServer({ server, rooms, config, logger = console 
     }
 
     function fail(code: CloseCode, reasonText: string): void {
-      logger.warn(`[ws ${state.id}] ${reasonText} → close ${code}`);
+      logger.warn({ ws: state.id, code, reason: reasonText }, 'closing');
       closeWith(code, reasonText);
     }
 
@@ -211,7 +211,7 @@ export function attachWebSocketServer({ server, rooms, config, logger = console 
       }
       state.room = room;
       state.player = player;
-      logger.info(`[ws ${state.id}] ${name} → ${room.id}`);
+      logger.info({ ws: state.id, room: room.id, player: name }, 'joined');
     }
 
     function onBinary(buf: Buffer): void {
@@ -305,7 +305,7 @@ export function attachWebSocketServer({ server, rooms, config, logger = console 
       const left = (perIp.get(ip) ?? 1) - 1;
       if (left <= 0) perIp.delete(ip);
       else perIp.set(ip, left);
-      logger.info(`[ws ${state.id}] closed (${code})`);
+      logger.info({ ws: state.id, code }, 'closed');
     });
   });
 

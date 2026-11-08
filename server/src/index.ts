@@ -9,6 +9,7 @@ import { ConfigError, loadConfig } from './config.ts';
 import type { Config } from './config.ts';
 import { attachMatchLogs } from './log/matchlog.ts';
 import type { MatchLogs } from './log/matchlog.ts';
+import { createLogger } from './log/logger.ts';
 import { attachMatches } from './matches.ts';
 import type { Matches } from './matches.ts';
 import { RoomManager, seedRooms } from './rooms.ts';
@@ -161,17 +162,6 @@ export function createApp({ config, logger = console }: { config: Config; logger
 }
 
 async function main(): Promise<void> {
-  // Необроблений виняток/відмову ЛОГУЄМО і виходимо (код 1) — не глушимо порожнім
-  // обробником: процес у невизначеному стані краще перезапустити, ніж лишити живим.
-  process.on('uncaughtException', (error: unknown) => {
-    console.error(`[server] uncaughtException: ${errorMessage(error)}`);
-    process.exit(1);
-  });
-  process.on('unhandledRejection', (reason: unknown) => {
-    console.error(`[server] unhandledRejection: ${errorMessage(reason)}`);
-    process.exit(1);
-  });
-
   let config: Config;
   try {
     config = loadConfig(process.env, { baseDir: SERVER_ROOT });
@@ -183,29 +173,42 @@ async function main(): Promise<void> {
     throw error;
   }
 
-  const app = createApp({ config });
+  const logger = createLogger({ level: config.logLevel });
+
+  // Необроблений виняток/відмову ЛОГУЄМО і виходимо (код 1) — не глушимо порожнім
+  // обробником: процес у невизначеному стані краще перезапустити, ніж лишити живим.
+  process.on('uncaughtException', (error: unknown) => {
+    logger.error({ err: errorMessage(error) }, 'uncaughtException');
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason: unknown) => {
+    logger.error({ err: errorMessage(reason) }, 'unhandledRejection');
+    process.exit(1);
+  });
+
+  const app = createApp({ config, logger });
   let address: AddressInfo;
   try {
     address = await app.start();
   } catch (error: unknown) {
-    console.error(`[server] не вдалося слухати ${config.host}:${config.port} — ${errnoCode(error) ?? errorMessage(error)}`);
+    logger.error({ host: config.host, port: config.port, err: errnoCode(error) ?? errorMessage(error) }, 'не вдалося слухати');
     process.exit(1);
   }
-  console.info(`[server] http://${address.address}:${address.port}  sha=${config.gitSha}  (логи: ${config.logDir})`);
+  logger.info({ url: `http://${address.address}:${address.port}`, sha: config.gitSha, logDir: config.logDir }, 'server listening');
 
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.info(`[server] ${signal}: зупиняюсь…`);
+    logger.info({ signal }, 'зупиняюсь');
 
     setTimeout(() => {
-      console.error('[server] shutdown завис, примусовий вихід');
+      logger.error('shutdown завис, примусовий вихід');
       process.exit(1);
     }, config.shutdownGraceMs * 2 + 2000).unref();
 
     await app.close();
-    console.info('[server] зупинено, логи дописано');
+    logger.info('зупинено, логи дописано');
     process.exit(0);
   };
 
