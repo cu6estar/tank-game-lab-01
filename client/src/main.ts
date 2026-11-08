@@ -247,4 +247,12 @@ async function boot(): Promise<void> {
   lobbyUi.show();
 }
 
+// PWA: реєструємо service worker (робить гру встановлюваною й дає офлайн-оболонку).
+// На localhost пропускаємо, щоб не заважати dev-серверу Vite і e2e-тестам.
+if ('serviceWorker' in navigator && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 void boot();
