@@ -9,3 +9,8 @@ logs-experiment
 
 # vitest coverage output
 coverage/
+
+# playwright
+test-results/
+playwright-report/
+playwright/.cache/
