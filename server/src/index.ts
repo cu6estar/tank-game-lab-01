@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, resolve } from 'node:path';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { createRequestHandler } from './api.ts';
 import { ConfigError, loadConfig } from './config.ts';
@@ -38,10 +39,56 @@ export function createApp({ config, logger = console }: { config: Config; logger
   const matches = attachMatches(rooms, { logger });
 
   let ws: WsServer | null = null;
+
+  // Лаг циклу подій: якщо він великий — крок 30 Гц сервер уже не тримає.
+  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  loopDelay.enable();
+  let accepting = true; // стає false під час зупинки → /ready = 503
+  let lastSample = { t: performance.now(), messages: 0, bytes: 0 };
+
+  const ms = (ns: number): number => (Number.isFinite(ns) ? +(ns / 1e6).toFixed(3) : 0);
+
+  const metrics = (): Record<string, unknown> => {
+    const s = ws?.stats;
+    const now = performance.now();
+    const elapsedSec = Math.max(0.001, (now - lastSample.t) / 1000);
+    const messages = s?.messages ?? 0;
+    const bytes = s?.bytes ?? 0;
+    const perSec = {
+      messages: +((messages - lastSample.messages) / elapsedSec).toFixed(1),
+      bytes: Math.round((bytes - lastSample.bytes) / elapsedSec),
+    };
+    lastSample = { t: now, messages, bytes };
+
+    const matchStats = matches.stats();
+    const players = matchStats.reduce((sum, m) => sum + m.players, 0);
+    const tickMsMax = matchStats.reduce((max, m) => Math.max(max, m.tickMs.max), 0);
+    const mem = process.memoryUsage();
+    return {
+      rooms: rooms.size,
+      players,
+      connections: ws?.connections ?? 0,
+      messagesTotal: messages,
+      bytesTotal: bytes,
+      rejected: s?.rejected ?? 0,
+      perSec,
+      tickMsMax: +tickMsMax.toFixed(3),
+      eventLoopLagMs: {
+        // histogram ще без семплів → NaN; зводимо до 0, інакше JSON дасть null
+        mean: ms(loopDelay.mean),
+        p99: ms(loopDelay.percentile(99)),
+        max: ms(loopDelay.max),
+      },
+      memoryMB: { rss: +(mem.rss / 1048576).toFixed(1), heapUsed: +(mem.heapUsed / 1048576).toFixed(1) },
+    };
+  };
+
   const handler = createRequestHandler({
     config,
     rooms,
     logger,
+    ready: () => accepting,
+    metrics,
     stats: () => ({
       connections: ws?.connections ?? 0,
       ...(ws ? ws.stats : {}),
@@ -96,6 +143,8 @@ export function createApp({ config, logger = console }: { config: Config; logger
      */
     close(): Promise<void> {
       closing ??= (async () => {
+        accepting = false; // /ready → 503: балансувальник перестає слати нових
+        loopDelay.disable();
         const httpClosed = new Promise<void>((resolveClose) => server.close(() => resolveClose()));
         server.closeIdleConnections();
 
@@ -112,6 +161,17 @@ export function createApp({ config, logger = console }: { config: Config; logger
 }
 
 async function main(): Promise<void> {
+  // Необроблений виняток/відмову ЛОГУЄМО і виходимо (код 1) — не глушимо порожнім
+  // обробником: процес у невизначеному стані краще перезапустити, ніж лишити живим.
+  process.on('uncaughtException', (error: unknown) => {
+    console.error(`[server] uncaughtException: ${errorMessage(error)}`);
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason: unknown) => {
+    console.error(`[server] unhandledRejection: ${errorMessage(reason)}`);
+    process.exit(1);
+  });
+
   let config: Config;
   try {
     config = loadConfig(process.env, { baseDir: SERVER_ROOT });
@@ -131,7 +191,7 @@ async function main(): Promise<void> {
     console.error(`[server] не вдалося слухати ${config.host}:${config.port} — ${errnoCode(error) ?? errorMessage(error)}`);
     process.exit(1);
   }
-  console.info(`[server] http://${address.address}:${address.port}  (логи: ${config.logDir})`);
+  console.info(`[server] http://${address.address}:${address.port}  sha=${config.gitSha}  (логи: ${config.logDir})`);
 
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {

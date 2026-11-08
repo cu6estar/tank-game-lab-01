@@ -44,6 +44,21 @@ const envText = (def: string) =>
       .optional(),
   ).transform((v) => v ?? def);
 
+/** Список через кому: "https://a.com, https://b.com" → ['https://a.com','https://b.com']. */
+const envList = (def: readonly string[]) =>
+  z.preprocess(
+    blankToUndef,
+    z
+      .string()
+      .transform((s) =>
+        s
+          .split(',')
+          .map((part) => part.trim())
+          .filter(Boolean),
+      )
+      .optional(),
+  ).transform((v) => v ?? [...def]);
+
 const envFlag = (def: boolean) =>
   z.preprocess((v) => {
     if (v === '' || v === undefined) return undefined;
@@ -71,6 +86,13 @@ const EnvSchema = z.object({
   KILL_CLIENT_BYTES: envInt(1024 * 1024, 1024, 512 * 1024 * 1024),
   DEMO_ENDPOINTS: envFlag(false),
   SHUTDOWN_GRACE_MS: envInt(5000, 0, 60_000),
+  // продакшн: дозволені Origin на рукостисканні WS (порожньо = будь-який, для dev)
+  ALLOWED_ORIGINS: envList([]),
+  // захист від одного клієнта, що відкриває сотні сокетів
+  MAX_CONNECTIONS_PER_IP: envInt(16, 1, 10_000),
+  LOG_LEVEL: envText('info'),
+  // SHA збірки: у /health звіряється з тегом релізу
+  GIT_SHA: envText('dev'),
 });
 
 export interface Config {
@@ -89,6 +111,10 @@ export interface Config {
   readonly killClientBytes: number;
   readonly demoEndpoints: boolean;
   readonly shutdownGraceMs: number;
+  readonly allowedOrigins: readonly string[];
+  readonly maxConnectionsPerIp: number;
+  readonly logLevel: string;
+  readonly gitSha: string;
 }
 
 export interface LoadConfigOptions {
@@ -129,5 +155,9 @@ export function loadConfig(env: Env = process.env, { baseDir }: LoadConfigOption
     killClientBytes: d.KILL_CLIENT_BYTES,
     demoEndpoints: d.DEMO_ENDPOINTS,
     shutdownGraceMs: d.SHUTDOWN_GRACE_MS,
+    allowedOrigins: d.ALLOWED_ORIGINS,
+    maxConnectionsPerIp: d.MAX_CONNECTIONS_PER_IP,
+    logLevel: d.LOG_LEVEL,
+    gitSha: d.GIT_SHA,
   });
 }

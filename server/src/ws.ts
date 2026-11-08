@@ -46,6 +46,15 @@ export interface WsStats {
   connections: number;
   dropped: number;
   closedByPolicy: number;
+  rejected: number; // відхилено на рукостисканні (Origin / ліміт на IP)
+  messages: number; // усього прийнято повідомлень
+  bytes: number; // усього прийнято байтів
+}
+
+/** Origin дозволено, якщо список порожній (dev) або Origin є в ньому. */
+function originAllowed(origin: string | undefined, allowed: readonly string[]): boolean {
+  if (allowed.length === 0) return true;
+  return origin !== undefined && allowed.includes(origin);
 }
 
 export interface WsServer {
@@ -74,14 +83,31 @@ function toBuffer(data: RawData): Buffer {
  * Кімнати про сокети не знають: ми даємо їм "гравця" з методом send().
  */
 export function attachWebSocketServer({ server, rooms, config, logger = console }: AttachWsOptions): WsServer {
+  const stats: WsStats = { connections: 0, dropped: 0, closedByPolicy: 0, rejected: 0, messages: 0, bytes: 0 };
+  const states = new WeakMap<WebSocket, ConnState>();
+  // скільки сокетів тримає кожна IP — щоб один клієнт не відкрив їх сотні
+  const perIp = new Map<string, number>();
+  const ipOf = (req: { socket: { remoteAddress?: string | undefined } }): string => req.socket.remoteAddress ?? '?';
+
   const wss = new WebSocketServer({
     server,
     path: '/ws',
     maxPayload: config.maxPayloadBytes, // більший кадр → ws сама закриває сокет кодом 1009
+    // Рукостискання: звіряємо Origin і ліміт з'єднань з однієї IP ще ДО upgrade.
+    verifyClient: ({ origin, req }, cb) => {
+      if (!originAllowed(origin, config.allowedOrigins)) {
+        stats.rejected += 1;
+        logger.warn(`[ws] Origin відхилено: ${origin ?? '(немає)'}`);
+        return cb(false, 403, 'Forbidden origin');
+      }
+      if ((perIp.get(ipOf(req)) ?? 0) >= config.maxConnectionsPerIp) {
+        stats.rejected += 1;
+        logger.warn(`[ws] ліміт з'єднань на IP ${ipOf(req)}`);
+        return cb(false, 429, 'Too many connections');
+      }
+      cb(true);
+    },
   });
-
-  const stats: WsStats = { connections: 0, dropped: 0, closedByPolicy: 0 };
-  const states = new WeakMap<WebSocket, ConnState>();
 
   wss.on('error', (error) => logger.error(`[ws] server error: ${error.message}`));
 
@@ -100,7 +126,9 @@ export function attachWebSocketServer({ server, rooms, config, logger = console 
     };
     states.set(socket, state);
     stats.connections += 1;
-    logger.info(`[ws ${state.id}] connected from ${req.socket.remoteAddress}`);
+    const ip = ipOf(req);
+    perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
+    logger.info(`[ws ${state.id}] connected from ${ip}`);
 
     function closeWith(code: CloseCode, reasonText: string): void {
       if (socket.readyState === WebSocket.OPEN) {
@@ -221,6 +249,8 @@ export function attachWebSocketServer({ server, rooms, config, logger = console 
         return fail(CLOSE.RATE_LIMIT, `більше ${config.rateLimitPerSec} повідомлень/с`);
       }
       const buf = toBuffer(data);
+      stats.messages += 1;
+      stats.bytes += buf.length;
       if (isBinary) {
         // Бінарні кадри (ввід, ping) дозволені лише після join
         if (!state.room) return fail(CLOSE.UNSUPPORTED_DATA, 'бінарний кадр до join');
@@ -272,6 +302,9 @@ export function attachWebSocketServer({ server, rooms, config, logger = console 
       clearTimeout(joinTimer);
       leaveRoom();
       stats.connections -= 1;
+      const left = (perIp.get(ip) ?? 1) - 1;
+      if (left <= 0) perIp.delete(ip);
+      else perIp.set(ip, left);
       logger.info(`[ws ${state.id}] closed (${code})`);
     });
   });

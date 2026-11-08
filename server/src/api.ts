@@ -87,6 +87,10 @@ export interface RequestHandlerOptions {
   readonly rooms: RoomManager;
   readonly logger?: Logger;
   readonly stats?: StatsFn;
+  /** true, поки сервер приймає нових гравців (false під час зупинки) → /ready. */
+  readonly ready?: () => boolean;
+  /** Прометеївські метрики процесу → /metrics. */
+  readonly metrics?: () => Record<string, unknown>;
 }
 
 export type RequestHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
@@ -95,22 +99,44 @@ export type RequestHandler = (req: IncomingMessage, res: ServerResponse) => Prom
  * Створює обробник HTTP-запитів. Маршрутизація — вручну за pathname:
  * для кількох маршрутів фреймворк не потрібен.
  */
-export function createRequestHandler({ config, rooms, logger = console, stats = () => ({}) }: RequestHandlerOptions): RequestHandler {
+export function createRequestHandler({
+  config,
+  rooms,
+  logger = console,
+  stats = () => ({}),
+  ready = () => true,
+  metrics = () => ({}),
+}: RequestHandlerOptions): RequestHandler {
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const pathname = (req.url ?? '/').split('?')[0] ?? '/';
     const { method } = req;
 
+    // /health — живий процес (liveness). git SHA звіряється з тегом релізу.
     if (pathname === '/health') {
       if (method !== 'GET') throw new HttpError(405, 'Method Not Allowed', allow(['GET']));
       const { rss, heapUsed } = process.memoryUsage();
       return sendJson(res, 200, {
         status: 'ok',
+        sha: config.gitSha,
         uptimeSec: Math.round(process.uptime()),
         rss,
         heapUsed,
         rooms: rooms.size,
         ...stats(),
       });
+    }
+
+    // /ready — чи приймає сервер гравців (readiness). Під час зупинки → 503.
+    if (pathname === '/ready') {
+      if (method !== 'GET') throw new HttpError(405, 'Method Not Allowed', allow(['GET']));
+      const ok = ready();
+      return sendJson(res, ok ? 200 : 503, { status: ok ? 'ready' : 'draining' });
+    }
+
+    // /metrics — зведення для моніторингу (гравці, кімнати, трафік, крок, лаг циклу).
+    if (pathname === '/metrics') {
+      if (method !== 'GET') throw new HttpError(405, 'Method Not Allowed', allow(['GET']));
+      return sendJson(res, 200, metrics());
     }
 
     // Статистика матчів: tickMs і jitterMs показують, чи встигає сервер тримати 30 Гц.
