@@ -34,7 +34,7 @@ export class Explosion extends Entity<'explosion'> {
 
     const count = Math.round(12 + size / 2);
     this.particles = Array.from({ length: count }, () => ({
-      pos,
+      pos: pos.clone(), // власний вектор на частинку (інакше всі мутують спільний)
       vel: Vector2.fromAngle(rand() * TAU, 40 + rand() * 220),
       size: 1.5 + rand() * (2 + size / 12),
     }));
@@ -44,8 +44,8 @@ export class Explosion extends Entity<'explosion'> {
     const drag = exp(-3 * dt);
 
     for (const particle of this.particles) {
-      particle.pos = particle.pos.add(particle.vel.scale(dt));
-      particle.vel = particle.vel.scale(drag);
+      particle.pos.addScaled(particle.vel, dt); // in-place: без алокацій на кадр
+      particle.vel.scaleBy(drag);
     }
   }
 }

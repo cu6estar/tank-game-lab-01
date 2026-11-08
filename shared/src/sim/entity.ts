@@ -51,7 +51,8 @@ export abstract class Entity<K extends EntityKind> {
   constructor({ kind, pos = new Vector2(), vel = new Vector2(), angle = 0, radius = 0 }: EntityInit<K>) {
     this.kind = kind;
     this.pos = pos;
-    this.prevPos = pos;
+    // окрема копія: pos мутується in-place щокадру, prevPos має лишатись старим
+    this.prevPos = pos.clone();
     this.vel = vel;
     this.angle = angle;
     this.prevAngle = angle;
@@ -79,7 +80,7 @@ export abstract class Entity<K extends EntityKind> {
       this.#components[name]?.update?.(this, dt, world);
     }
 
-    this.pos = this.pos.add(this.vel.scale(dt));
+    this.pos.addScaled(this.vel, dt); // in-place: нуль алокацій на кадр
 
     this.ttl -= dt;
     if (this.ttl <= 0) this.kill();
@@ -87,7 +88,7 @@ export abstract class Entity<K extends EntityKind> {
 
   /** Запам'ятати стан до зміни — рендер інтерполює між prev* і поточним. */
   snapshot(): void {
-    this.prevPos = this.pos;
+    this.prevPos.copyFrom(this.pos); // мутуємо наявний вектор, не створюємо новий
     this.prevAngle = this.angle;
   }
 

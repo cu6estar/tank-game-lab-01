@@ -168,8 +168,7 @@ export class World extends Bus<WorldEvents> {
 
     const x = wrapCoordinate(entity.pos.x, this.width);
     const y = wrapCoordinate(entity.pos.y, this.height);
-    if (x !== entity.pos.x || y !== entity.pos.y)
-      entity.pos = new Vector2(x, y);
+    if (x !== entity.pos.x || y !== entity.pos.y) entity.pos.set(x, y); // in-place
   }
 
   #sweep(): void {

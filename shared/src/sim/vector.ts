@@ -14,14 +14,19 @@ export function wrapAngle(angle: number): number {
 }
 
 /**
- * 2D-вектор. Усі методи ЧИСТІ: повертають новий вектор і не мутують
- * ні `this`, ні аргумент (поля — readonly, тож tsc не дасть мутувати). Тому `entity.pos = entity.pos.add(...)` —
- * це заміна посилання, а не зміна старого вектора (це важливо для
- * інтерполяції: `prevPos` лишається незмінним).
+ * 2D-вектор. Арифметичні методи (`add`, `scale`, …) ЧИСТІ: повертають новий
+ * вектор і нічого не мутують — зручно й безпечно для разових обчислень.
+ *
+ * Окремо є кілька in-place методів (`set`, `copyFrom`, `addScaled`,
+ * `scaleBy`) з суфіксом-дією: вони мутують `this` і повертають його. Їх
+ * використовує лише гарячий шлях кроку (integrate кожної сутності щокадру),
+ * щоб не створювати по два вектори на сутність за кадр. Поведінка та сама —
+ * ті самі операції з float, тому хеш стану не змінюється. Поля вже не
+ * readonly саме заради цих методів; поза гарячим шляхом мутувати не треба.
  */
 export class Vector2 {
-  readonly x: number;
-  readonly y: number;
+  x: number;
+  y: number;
 
   constructor(x = 0, y = 0) {
     this.x = x;
@@ -30,6 +35,41 @@ export class Vector2 {
 
   static fromAngle(angle: number, length = 1): Vector2 {
     return new Vector2(cos(angle) * length, sin(angle) * length);
+  }
+
+  // --- in-place (лише гарячий шлях): мутують this, повертають this ---
+
+  /** Записати координати. */
+  set(x: number, y: number): this {
+    this.x = x;
+    this.y = y;
+    return this;
+  }
+
+  /** Скопіювати з іншого вектора. */
+  copyFrom(v: Vector2): this {
+    this.x = v.x;
+    this.y = v.y;
+    return this;
+  }
+
+  /** this += v·k. Те саме, що this = this.add(v.scale(k)), але без алокацій. */
+  addScaled(v: Vector2, k: number): this {
+    this.x += v.x * k;
+    this.y += v.y * k;
+    return this;
+  }
+
+  /** this *= k. */
+  scaleBy(k: number): this {
+    this.x *= k;
+    this.y *= k;
+    return this;
+  }
+
+  /** Окрема копія (для prevPos, щоб мутація pos її не зачіпала). */
+  clone(): Vector2 {
+    return new Vector2(this.x, this.y);
   }
 
   add(v: Vector2): Vector2 {

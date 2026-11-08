@@ -11,32 +11,97 @@ import type { World, WorldEvents } from './world.ts';
 
 const ASTEROID_RAM_DAMAGE = 25;
 
-/**
- * Детекція коло-коло. Наївний O(n²): для кількох десятків сутностей цього
- * досить. radius <= 0 (вибухи) в колізіях не бере участі.
- *
- * Створює масив на кожен виклик — для навчальної гри прийнятно; якщо це
- * стане вузьким місцем, систему можна підмінити (World.collisionSystem).
- */
-export function findCollisions(entities: Iterable<SimEntity>): [SimEntity, SimEntity][] {
+/** Відфільтрувати «тверді» сутності в порядку світу (radius <= 0 — поза колізіями). */
+function solidEntities(entities: Iterable<SimEntity>): SimEntity[] {
   const solid: SimEntity[] = [];
   for (const entity of entities) {
     if (entity.alive && entity.radius > 0) solid.push(entity);
   }
+  return solid;
+}
 
+/**
+ * Наївний O(n²): кожна пара з кожною. Лишаємо як еталон поведінки — сеточна
+ * версія мусить давати ТОЙ САМИЙ список пар (див. мікробенч і тест рівності).
+ */
+export function findCollisionsNaive(entities: Iterable<SimEntity>): [SimEntity, SimEntity][] {
+  const solid = solidEntities(entities);
   const pairs: [SimEntity, SimEntity][] = [];
   for (let i = 0; i < solid.length; i++) {
     for (let j = i + 1; j < solid.length; j++) {
       const a = solid[i];
       const b = solid[j];
-      if (!a || !b) continue; // недосяжно: i, j < length (потрібно для noUncheckedIndexedAccess)
+      if (!a || !b) continue; // недосяжно: i, j < length (для noUncheckedIndexedAccess)
       const reach = a.radius + b.radius;
-
       if (a.pos.distanceSqTo(b.pos) <= reach * reach) pairs.push([a, b]);
     }
   }
-
   return pairs;
+}
+
+// Зсув для ключа комірки: координати можуть бути від'ємними (мікробенч),
+// а в грі — у [0, розмір). 1<<15 з запасом перекриває обидва випадки.
+const CELL_BIAS = 1 << 15;
+const cellKey = (cx: number, cy: number): number => (cx + CELL_BIAS) * (CELL_BIAS * 2) + (cy + CELL_BIAS);
+
+/**
+ * Рівномірна просторова сітка замість O(n²). Розмір комірки = 2·maxRadius,
+ * тож дві сутності, що торкаються (відстань <= r_a+r_b <= 2·maxRadius),
+ * завжди в сусідніх комірках — досить перевірити околицю 3×3.
+ *
+ * Пари повертаються ВІДСОРТОВАНИМИ за індексами (i, j) у порядку світу —
+ * рівно так, як їх видає наївний цикл. Тому порядок обробки (а отже й хеш
+ * стану) не змінюється: сітка лише швидша, не «інша».
+ */
+export function findCollisions(entities: Iterable<SimEntity>): [SimEntity, SimEntity][] {
+  const solid = solidEntities(entities);
+  const n = solid.length;
+  if (n < 2) return [];
+
+  let maxRadius = 0;
+  for (const e of solid) if (e.radius > maxRadius) maxRadius = e.radius;
+  const cell = Math.max(1, maxRadius * 2);
+
+  const grid = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const e = solid[i];
+    if (!e) continue;
+    const key = cellKey(Math.floor(e.pos.x / cell), Math.floor(e.pos.y / cell));
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(i);
+    else grid.set(key, [i]);
+  }
+
+  const pairs: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const a = solid[i];
+    if (!a) continue;
+    const cx = Math.floor(a.pos.x / cell);
+    const cy = Math.floor(a.pos.y / cell);
+    for (let gx = cx - 1; gx <= cx + 1; gx++) {
+      for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const bucket = grid.get(cellKey(gx, gy));
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (j <= i) continue; // кожну пару рахуємо один раз (j > i)
+          const b = solid[j];
+          if (!b) continue;
+          const reach = a.radius + b.radius;
+          if (a.pos.distanceSqTo(b.pos) <= reach * reach) pairs.push([i, j]);
+        }
+      }
+    }
+  }
+
+  pairs.sort((p, q) => p[0] - q[0] || p[1] - q[1]); // той самий порядок, що й O(n²)
+
+  const result: [SimEntity, SimEntity][] = [];
+  for (const [i, j] of pairs) {
+    const a = solid[i];
+    const b = solid[j];
+    if (a && b) result.push([a, b]);
+  }
+  return result;
 }
 
 /**
