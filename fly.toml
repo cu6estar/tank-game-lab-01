@@ -1,0 +1,46 @@
+# Fly.io. Перейменуйте app на свій (глобально унікальний) або запустіть
+# `flyctl launch --no-deploy` — він створить app і припише ім'я сюди.
+# Домен буде https://<app>.fly.dev, тож потім:
+#   flyctl secrets set ALLOWED_ORIGINS=https://<app>.fly.dev
+app = "tank-arena-lab"
+primary_region = "waw" # Варшава — найближче до Києва
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  HOST = "0.0.0.0"
+  # ALLOWED_ORIGINS і MAX_CONNECTIONS_PER_IP задаються через `flyctl secrets set`
+
+[http_service]
+  internal_port = 3000
+  force_https = true # публічна сторінка тільки https → сокет лише wss://
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1 # гравці однієї кімнати мусять бути в одному процесі
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 150
+    hard_limit = 200
+
+# liveness: процес живий
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "15s"
+  method = "GET"
+  path = "/health"
+  timeout = "3s"
+
+# readiness: приймає гравців (під час зупинки → 503)
+[[http_service.checks]]
+  grace_period = "5s"
+  interval = "10s"
+  method = "GET"
+  path = "/ready"
+  timeout = "3s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

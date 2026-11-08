@@ -47,15 +47,18 @@ jobs:
     needs: image
     runs-on: ubuntu-latest
     steps:
-      # Хостинг-незалежний деплой: більшість платформ (Render, Railway, Fly…)
-      # дають deploy-hook — URL, POST на який запускає викатку свіжого образу.
-      # Поклади URL у секрет DEPLOY_HOOK_URL. Без секрета крок просто пропускається.
-      - name: Trigger deploy hook
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Деплой на Fly.io. Поклади токен у секрет FLY_API_TOKEN
+      # (flyctl tokens create deploy). Без токена крок просто пропускається —
+      # образ у GHCR лишається готовим до ручної викатки.
+      - name: Deploy to Fly.io
         env:
-          HOOK: ${{ secrets.DEPLOY_HOOK_URL }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          if [ -z "$HOOK" ]; then
-            echo "DEPLOY_HOOK_URL не задано — пропускаю (образ у GHCR готовий до ручної викатки)."
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN не задано — пропускаю деплой (образ у GHCR готовий)."
             exit 0
           fi
-          curl -fsS -X POST "$HOOK" && echo "deploy-hook смикнуто"
+          flyctl deploy --remote-only --build-arg GIT_SHA="${GITHUB_SHA}"

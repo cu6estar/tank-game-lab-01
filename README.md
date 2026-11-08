@@ -117,9 +117,18 @@ docker run -p 3000:3000 \
 
 ### Випуск і деплой
 
-CI (`release.yml`) **за тегом `v*`** збирає образ, підставляє `GIT_SHA`, публікує у **GHCR** (`ghcr.io/<owner>/tank-game-lab-01`) і, якщо заданий секрет `DEPLOY_HOOK_URL`, смикає deploy-hook хостингу (Render / Railway / Fly — усі дають такий URL). Кожен push і PR додатково **перевіряє, що образ збирається** (job `docker` у `ci.yml`).
+CI (`release.yml`) **за тегом `v*`** збирає образ, підставляє `GIT_SHA`, публікує у **GHCR** (`ghcr.io/<owner>/tank-game-lab-01`) і деплоїть на **Fly.io** (`flyctl deploy`, якщо заданий секрет `FLY_API_TOKEN`). Кожен push і PR додатково **перевіряє, що образ збирається** (job `docker` у `ci.yml`).
 
-Щоб підняти живу версію: під'єднати репозиторій до хостингу (або вказати GHCR-образ), додати секрет `DEPLOY_HOOK_URL`, виставити `ALLOWED_ORIGINS` на свій домен і поставити тег `v1.0.0`. На продакшн-сторінці сокет лише `wss://` (клієнт сам підвищує схему на https). У `/health` видно `sha`, що збігається з тегом.
+Разове налаштування Fly (конфіг — у `fly.toml`):
+
+```bash
+flyctl launch --no-deploy            # створює app, вписує ім'я у fly.toml
+flyctl secrets set ALLOWED_ORIGINS=https://<app>.fly.dev
+flyctl tokens create deploy          # токен → GitHub secret FLY_API_TOKEN
+git tag v1.0.0 && git push origin v1.0.0   # → CI збирає, публікує, деплоїть
+```
+
+На продакшн-сторінці сокет лише `wss://` (клієнт сам підвищує схему на https). У `/health` видно `sha`, що збігається з тегом. `fly.toml` піднімає health-checks на `/health` і `/ready`.
 
 ### PWA
 
@@ -131,7 +140,7 @@ CI (`release.yml`) **за тегом `v*`** збирає образ, підст�
 
 ### Що лишилось зробити вручну (поза кодом)
 
-- **Жива адреса** (`wss://`) — вибрати хостинг, під'єднати репо/образ, виставити секрети. Код і workflow готові; лишається натиснути «деплой».
+- **Жива адреса** (`wss://`) на Fly.io — `flyctl launch`, секрети `ALLOWED_ORIGINS` + `FLY_API_TOKEN`, тег `v1.0.0`. Код, `fly.toml` і workflow готові; лишається виконати ці команди.
 - **Двоє людей з різних мереж** зіграти одночасно та записати їхній **RTT** у таблицю нижче.
 - **Відео на 3–5 хвилин** і фінальні теги `lab-08` та `v1.0.0`.
 
