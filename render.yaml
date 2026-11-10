@@ -1,0 +1,17 @@
+# Render blueprint: безкоштовний web-сервіс із нашого Dockerfile.
+# Render сам ставить PORT (сервер читає його з оточення), HOST=0.0.0.0 — з образу.
+# Деплой: у дашборді Render → New → Blueprint → цей репозиторій → Apply.
+services:
+  - type: web
+    name: tank-arena
+    runtime: docker
+    plan: free
+    region: frankfurt # найближчий до Києва регіон Render
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GIT_SHA
+        value: render
+      # ALLOWED_ORIGINS можна лишити порожнім (будь-який Origin) — для демо ок.
+      # Для суворого режиму: додати тут свій домен https://<name>.onrender.com
